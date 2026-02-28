@@ -8,12 +8,12 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/priority_notify.db"
     SECRET_KEY: str = "change-me-to-a-random-secret"
-    ALLOWED_HOSTS: str = "localhost,127.0.0.1"
+    ALLOWED_HOSTS: str = "notifications.osmosis.page,localhost,127.0.0.1"
 
     AUTHENTIK_ISSUER_URL: str = "https://auth.osmosis.page"
     AUTHENTIK_CLIENT_ID: str = ""
     AUTHENTIK_CLIENT_SECRET: str = ""
-    AUTHENTIK_REDIRECT_URI: str = "http://localhost:8000/auth/callback"
+    AUTHENTIK_REDIRECT_URI: str = "https://notifications.osmosis.page/auth/callback"
 
     LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: str = ""

@@ -1,14 +1,12 @@
 services:
   server:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/kukaraf/priority-notify:latest
     ports:
       - "8000:8000"
     volumes:
       - data:/app/data
     env_file:
-      - ../.env
+      - .env
     restart: unless-stopped
 
 volumes:
