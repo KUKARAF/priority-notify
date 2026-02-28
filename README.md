@@ -11,7 +11,26 @@ make db-upgrade
 make dev
 ```
 
-Open `http://localhost:8000`, sign in, create a device token, then push a notification:
+Open `http://localhost:8000`, sign in, and create a device token.
+
+## Sending Notifications
+
+### From the web UI
+
+Click **Add notification** on the dashboard to create a notification with a title, message, priority, and source.
+
+### With the helper script
+
+Add your token to `.env` as `TOKEN`, then:
+
+```bash
+./send-notification.sh "Deploy finished" "v2.4.1 is live" medium ci
+# Usage: ./send-notification.sh <title> [message] [priority] [source]
+```
+
+Set `BASE_URL` in `.env` to override the default endpoint.
+
+### With curl
 
 ```bash
 curl -X POST http://localhost:8000/api/notifications/ \
@@ -19,6 +38,8 @@ curl -X POST http://localhost:8000/api/notifications/ \
   -H "Content-Type: application/json" \
   -d '{"title": "Hello", "priority": "high", "source": "test"}'
 ```
+
+The `priority` field accepts `low`, `medium`, `high`, or `critical`. The `message` and `source` fields are optional.
 
 ## Setup
 
