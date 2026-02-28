@@ -102,9 +102,10 @@ async def exchange_code_for_tokens(
 
 async def validate_id_token(id_token: str, settings: Settings) -> dict:  # type: ignore[type-arg]
     jwks = await get_jwks(settings)
+    oidc_config = await get_oidc_config(settings)
     token = jwt.decode(id_token, jwks)
     claims = token.claims
-    if claims.get("iss") != settings.AUTHENTIK_ISSUER_URL:
+    if claims.get("iss") != oidc_config["issuer"]:
         raise ValueError("Invalid issuer")
     if claims.get("aud") != settings.AUTHENTIK_CLIENT_ID:
         raise ValueError("Invalid audience")

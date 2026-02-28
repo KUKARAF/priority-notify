@@ -21,7 +21,7 @@ This guide walks through creating an OAuth2/OIDC provider and application in Aut
 | **Client type** | **Confidential** |
 | **Client ID** | Auto-generated — copy this value for `.env` |
 | **Client Secret** | Auto-generated — copy this value for `.env` |
-| **Redirect URIs/Origins** | `http://localhost:8000/auth/callback` (dev) and your production URL, e.g. `https://notify.example.com/auth/callback` |
+| **Redirect URIs/Origins** | `http://localhost:8000/auth/callback` (dev) and `https://notifications.osmosis.page/auth/callback` (production) |
 
 4. Under **Advanced protocol settings**:
    - **Scopes**: Ensure `openid`, `email`, and `profile` are selected
@@ -40,7 +40,7 @@ This guide walks through creating an OAuth2/OIDC provider and application in Aut
 | **Name** | `priority-notify` |
 | **Slug** | `priority-notify` |
 | **Provider** | Select the `priority-notify` provider you just created |
-| **Launch URL** | `https://notify.example.com/` (or your server URL) |
+| **Launch URL** | `https://notifications.osmosis.page/` |
 
 3. Click **Create**
 
