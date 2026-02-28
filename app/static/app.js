@@ -68,6 +68,42 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// === Add notification modal ===
+
+function openAddNotification() {
+  document.getElementById('add-notification-modal').style.display = 'flex';
+}
+
+function closeAddNotification() {
+  document.getElementById('add-notification-modal').style.display = 'none';
+}
+
+async function submitNotification(e) {
+  e.preventDefault();
+  const title = document.getElementById('notif-title').value;
+  const message = document.getElementById('notif-message').value || null;
+  const priority = document.getElementById('notif-priority').value;
+  const source = document.getElementById('notif-source').value || null;
+
+  const resp = await fetch('/api/notifications/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, message, priority, source }),
+  });
+
+  if (resp.ok) {
+    closeAddNotification();
+    document.getElementById('notif-title').value = '';
+    document.getElementById('notif-message').value = '';
+    document.getElementById('notif-priority').value = 'medium';
+    document.getElementById('notif-source').value = '';
+  } else {
+    alert('Failed to create notification');
+  }
+
+  return false;
+}
+
 // === Notification actions ===
 
 async function markAs(id, status) {

@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.auth import get_current_user, get_current_user_from_token
+from app.auth import get_current_user
 from app.database import get_db
 from app.models import Notification, Priority, Status, User
 from app.schemas import (
@@ -67,11 +67,8 @@ async def create_notification(
     payload: NotificationCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user_from_token),
+    user: User = Depends(get_current_user),
 ) -> NotificationResponse:
-    if user is None:
-        raise HTTPException(status_code=401, detail="Token auth required to create notifications")
-
     notification = Notification(
         user_id=user.id,
         title=payload.title,

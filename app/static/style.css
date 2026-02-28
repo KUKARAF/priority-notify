@@ -229,7 +229,8 @@ body {
 .form-action { flex: 0; }
 
 .form-group input,
-.form-group select {
+.form-group select,
+.form-group textarea {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
@@ -238,8 +239,14 @@ body {
   font-size: 0.875rem;
 }
 
+.form-group textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
 .form-group input:focus,
-.form-group select:focus {
+.form-group select:focus,
+.form-group textarea:focus {
   outline: none;
   border-color: var(--primary);
 }
@@ -352,6 +359,52 @@ body {
 
 .login-card h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
 .login-card p { color: var(--text-muted); margin-bottom: 1.5rem; }
+
+/* === Modal === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 480px;
+  margin: 1rem;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.modal-header h2 { font-size: 1.1rem; font-weight: 600; }
+
+.modal .form-group { margin-bottom: 0.75rem; }
+
+.modal .form-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.modal .form-row .form-group { flex: 1; min-width: 0; }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
 
 /* === Animations === */
 @keyframes slideIn {
