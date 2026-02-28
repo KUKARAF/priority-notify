@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Devices — priority-notify{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Devices &amp; API Tokens</h1>
+</div>
+
+<section class="card">
+  <h2>Create a new token</h2>
+  <form id="create-token-form" class="token-form" onsubmit="return createToken(event)">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="token-name">Device name</label>
+        <input type="text" id="token-name" name="name" placeholder="e.g. Pixel 8, Work Laptop" required maxlength="255">
+      </div>
+      <div class="form-group">
+        <label for="token-type">Device type</label>
+        <select id="token-type" name="device_type">
+          <option value="android">Android</option>
+          <option value="gnome">GNOME</option>
+          <option value="other" selected>Other</option>
+        </select>
+      </div>
+      <div class="form-group form-action">
+        <button type="submit" class="btn btn-primary">Create token</button>
+      </div>
+    </div>
+  </form>
+</section>
+
+<div id="new-token-display" class="card token-reveal" style="display:none;">
+  <h2>New token created</h2>
+  <p class="warning">Copy this token now — it won't be shown again.</p>
+  <div class="token-value-row">
+    <code id="new-token-value" class="token-value"></code>
+    <button class="btn btn-small" onclick="copyToken()">Copy</button>
+  </div>
+  <div id="qr-container" class="qr-container"></div>
+  <button class="btn btn-ghost" onclick="dismissToken()">Done</button>
+</div>
+
+<section class="card">
+  <h2>Active tokens</h2>
+  {% if tokens %}
+  <table class="token-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Created</th>
+        <th>Last used</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="token-list">
+      {% for t in tokens %}
+      <tr data-id="{{ t.id }}">
+        <td class="token-name">{{ t.name }}</td>
+        <td><span class="device-badge {{ t.device_type }}">{{ t.device_type }}</span></td>
+        <td><time datetime="{{ t.created_at }}">{{ t.created_at.strftime('%b %d, %Y') }}</time></td>
+        <td>
+          {% if t.last_used_at %}
+          <time datetime="{{ t.last_used_at }}">{{ t.last_used_at.strftime('%b %d, %H:%M') }}</time>
+          {% else %}
+          <span class="muted">Never</span>
+          {% endif %}
+        </td>
+        <td>
+          <button class="btn btn-small btn-danger" onclick="revokeToken('{{ t.id }}', '{{ t.name }}')">Revoke</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <p>No tokens yet.</p>
+    <p class="muted">Create a token above to connect a device or script.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app.js"></script>
+{% endblock %}

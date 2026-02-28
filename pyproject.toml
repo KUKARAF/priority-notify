@@ -1,0 +1,52 @@
+[project]
+name = "priority-notify"
+version = "0.1.0"
+description = "Self-hosted notification server with OIDC auth and SSE delivery"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.21",
+    "alembic>=1.14",
+    "httpx>=0.28",
+    "joserfc>=1.0",
+    "authlib>=1.4",
+    "pydantic-settings>=2.7",
+    "sse-starlette>=2.2",
+    "jinja2>=3.1",
+    "qrcode[pil]>=8.0",
+    "itsdangerous>=2.2",
+    "bcrypt>=4.2",
+    "structlog>=24.4",
+    "python-multipart>=0.0.18",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.9",
+    "mypy>=1.14",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "TCH"]
+ignore = ["B008", "UP046"]  # B008: Depends() in FastAPI defaults is idiomatic; UP046: Pydantic needs Generic[T]
+exclude = ["alembic/versions/*"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/*" = ["E501", "I001", "UP007", "UP035"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
