@@ -21,6 +21,21 @@ from app.sse import broker
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
+badge_router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+@badge_router.get("/{user_id}/badge")
+async def badge(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(func.count())
+        .select_from(Notification)
+        .where(Notification.user_id == user_id, Notification.status == Status.unread)
+    )
+    count = result.scalar() or 0
+    return {"has_unread": count > 0}
 
 
 @router.get("/", response_model=PaginatedResponse[NotificationResponse])

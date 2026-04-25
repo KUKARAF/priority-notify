@@ -13,7 +13,10 @@
       <div class="nav-links">
         <a href="/" class="nav-link {% if active == 'dashboard' %}active{% endif %}">Dashboard</a>
         <a href="/tokens" class="nav-link {% if active == 'tokens' %}active{% endif %}">Devices</a>
-        <span class="nav-user">{{ user.name }}</span>
+        <span class="nav-user">
+          {{ user.name }}
+          <button class="user-id-btn" onclick="navigator.clipboard.writeText('{{ user.id }}')" title="Copy your user ID">{{ user.id[:8] }}…</button>
+        </span>
         <a href="/auth/logout" class="nav-link nav-logout">Logout</a>
       </div>
     </div>

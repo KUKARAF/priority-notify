@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/disk-health-check"
+ENV_FILE="$CONFIG_DIR/.env"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Error: $ENV_FILE not found. Run install.sh first." >&2
+  exit 1
+fi
+
+source "$ENV_FILE"
+
+: "${TOKEN:?TOKEN must be set in $ENV_FILE}"
+
+BASE_URL="https://notifications.osmosis.page"
+API_URL="$BASE_URL/api/notifications/"
+
+issues=()
+
+# Get all disk devices (exclude loop, ram, etc.)
+mapfile -t disks < <(lsblk -dnpo NAME,TYPE | awk '$2 == "disk" {print $1}')
+
+if [[ ${#disks[@]} -eq 0 ]]; then
+  echo "No disks found." >&2
+  exit 0
+fi
+
+for disk in "${disks[@]}"; do
+  model=$(lsblk -dnpo MODEL "$disk" 2>/dev/null | xargs)
+  label="${disk}${model:+ ($model)}"
+
+  # Determine if NVMe
+  if [[ "$disk" == /dev/nvme* ]]; then
+    smart_json=$(sudo smartctl -a -j "$disk" 2>/dev/null) || true
+
+    # NVMe media errors
+    media_errors=$(echo "$smart_json" | jq -r '.nvme_smart_health_information_log.media_errors // 0')
+    if [[ "$media_errors" -gt 0 ]]; then
+      issues+=("$label: $media_errors NVMe media error(s)")
+    fi
+
+    # NVMe percentage used (wear level)
+    pct_used=$(echo "$smart_json" | jq -r '.nvme_smart_health_information_log.percentage_used // 0')
+    if [[ "$pct_used" -ge 90 ]]; then
+      issues+=("$label: NVMe wear level at ${pct_used}%")
+    fi
+
+    # NVMe critical warning
+    critical_warning=$(echo "$smart_json" | jq -r '.nvme_smart_health_information_log.critical_warning // 0')
+    if [[ "$critical_warning" -ne 0 ]]; then
+      issues+=("$label: NVMe critical warning flag set ($critical_warning)")
+    fi
+  else
+    # HDD / SATA SSD
+    smart_json=$(sudo smartctl -a -j "$disk" 2>/dev/null) || true
+
+    # Overall SMART health
+    health=$(echo "$smart_json" | jq -r '.smart_status.passed // true')
+    if [[ "$health" != "true" ]]; then
+      issues+=("$label: SMART health test FAILED")
+    fi
+
+    # Helper to read a SMART attribute value by ID
+    get_attr() {
+      echo "$smart_json" | jq -r \
+        --argjson id "$1" \
+        '[.ata_smart_attributes.table[]? | select(.id == $id) | .raw.value] | first // 0'
+    }
+
+    # Reallocated sectors (ID 5)
+    realloc=$(get_attr 5)
+    if [[ "$realloc" -gt 0 ]]; then
+      issues+=("$label: $realloc reallocated sector(s)")
+    fi
+
+    # Current pending sectors (ID 197)
+    pending=$(get_attr 197)
+    if [[ "$pending" -gt 0 ]]; then
+      issues+=("$label: $pending current pending sector(s)")
+    fi
+
+    # Uncorrectable errors (ID 198)
+    uncorrectable=$(get_attr 198)
+    if [[ "$uncorrectable" -gt 0 ]]; then
+      issues+=("$label: $uncorrectable uncorrectable error(s)")
+    fi
+  fi
+done
+
+# Only send a notification if there are issues
+if [[ ${#issues[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+hostname=$(hostname)
+message=$(printf '%s\n' "${issues[@]}")
+
+body=$(jq -n \
+  --arg title "Disk health issues on $hostname" \
+  --arg message "$message" \
+  --arg priority "critical" \
+  --arg source "smartctl" \
+  '{title: $title, message: $message, priority: $priority, source: $source}')
+
+curl -s -X POST "$API_URL" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$body" > /dev/null

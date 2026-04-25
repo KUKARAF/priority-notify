@@ -58,6 +58,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # Routers
 app.include_router(auth.router)
 app.include_router(notifications.router)
+app.include_router(notifications.badge_router)
 app.include_router(tokens.router)
 app.include_router(frontend.router)
 

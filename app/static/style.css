@@ -66,7 +66,9 @@ body {
 
 .nav-link:hover { color: var(--text); }
 .nav-link.active { color: var(--text); border-bottom-color: var(--primary); }
-.nav-user { color: var(--text-muted); font-size: 0.8rem; }
+.nav-user { color: var(--text-muted); font-size: 0.8rem; display: flex; align-items: center; gap: 0.4rem; }
+.user-id-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); font-size: 0.7rem; font-family: monospace; padding: 0.1rem 0.35rem; border-radius: 4px; cursor: pointer; }
+.user-id-btn:hover { border-color: var(--primary); color: var(--text); }
 .nav-logout { color: var(--danger); }
 
 /* === Layout === */
