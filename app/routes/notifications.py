@@ -30,8 +30,9 @@ async def badge(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     result = await db.execute(
-        select(Notification.notification_icon)
-        .where(Notification.user_id == user_id, Notification.status == Status.unread)
+        select(Notification.notification_icon).where(
+            Notification.user_id == user_id, Notification.status == Status.unread
+        )
     )
     rows = result.all()
     has_unread = len(rows) > 0
