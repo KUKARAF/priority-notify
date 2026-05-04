@@ -30,12 +30,13 @@ async def badge(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     result = await db.execute(
-        select(func.count())
-        .select_from(Notification)
+        select(Notification.notification_icon)
         .where(Notification.user_id == user_id, Notification.status == Status.unread)
     )
-    count = result.scalar() or 0
-    return {"has_unread": count > 0}
+    rows = result.all()
+    has_unread = len(rows) > 0
+    notification_icons = [icon for (icon,) in rows if icon is not None]
+    return {"has_unread": has_unread, "notification_icons": notification_icons}
 
 
 @router.get("/", response_model=PaginatedResponse[NotificationResponse])
@@ -90,6 +91,7 @@ async def create_notification(
         message=payload.message,
         priority=payload.priority,
         source=payload.source,
+        notification_icon=payload.notification_icon,
         metadata_=payload.metadata,
     )
     db.add(notification)

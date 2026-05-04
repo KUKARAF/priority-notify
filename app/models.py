@@ -58,6 +58,7 @@ class Notification(Base):
     priority: Mapped[Priority] = mapped_column(Enum(Priority), default=Priority.medium)
     status: Mapped[Status] = mapped_column(Enum(Status), default=Status.unread)
     source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notification_icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)

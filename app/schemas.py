@@ -16,6 +16,7 @@ class NotificationCreate(BaseModel):
     message: str | None = None
     priority: Priority = Priority.medium
     source: str | None = Field(default=None, max_length=255)
+    notification_icon: str | None = Field(default=None, max_length=64)
     metadata: dict | None = None
 
 
@@ -33,6 +34,7 @@ class NotificationResponse(BaseModel):
     priority: Priority
     status: Status
     source: str | None
+    notification_icon: str | None
     created_at: datetime
     read_at: datetime | None
     metadata: dict | None = Field(default=None, alias="metadata_")
