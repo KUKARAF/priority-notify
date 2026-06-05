@@ -26,13 +26,35 @@ async def dashboard(
     request: Request,
     status: str | None = None,
     priority: str | None = None,
+    user: User | None = Depends(_get_optional_user),
+) -> HTMLResponse:
+    if not user:
+        return templates.TemplateResponse(request, "login.html")
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {
+            "user": user,
+            "filter_status": status,
+            "filter_priority": priority,
+            "active": "dashboard",
+        },
+    )
+
+
+@router.get("/notifications/fragment", response_class=HTMLResponse)
+async def notifications_fragment(
+    request: Request,
+    status: str | None = None,
+    priority: str | None = None,
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(_get_optional_user),
 ) -> HTMLResponse:
     if not user:
-        return templates.TemplateResponse(request, "login.html")
+        return HTMLResponse("", status_code=200)
 
     query = select(Notification).where(Notification.user_id == user.id)
     count_query = (
@@ -53,18 +75,19 @@ async def dashboard(
     result = await db.execute(query)
     notifications = result.scalars().all()
 
+    has_more = (offset + limit) < total
+    next_offset = offset + limit
+
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
+        "notification_fragment.html",
         {
-            "user": user,
             "notifications": notifications,
-            "total": total,
+            "has_more": has_more,
+            "next_offset": next_offset,
             "limit": limit,
-            "offset": offset,
             "filter_status": status,
             "filter_priority": priority,
-            "active": "dashboard",
         },
     )
 

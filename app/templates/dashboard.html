@@ -6,56 +6,45 @@
   <h1>Notifications</h1>
   <div class="filters">
     <button class="btn btn-primary" onclick="openAddNotification()">Add notification</button>
-    <select id="filter-status" onchange="applyFilters()">
+    <select id="filter-status" name="status"
+            hx-get="/notifications/fragment"
+            hx-target="#notification-list"
+            hx-swap="innerHTML"
+            hx-include="[name='priority']">
       <option value="">All statuses</option>
       <option value="unread" {% if filter_status == 'unread' %}selected{% endif %}>Unread</option>
       <option value="read" {% if filter_status == 'read' %}selected{% endif %}>Read</option>
       <option value="archived" {% if filter_status == 'archived' %}selected{% endif %}>Archived</option>
     </select>
-    <select id="filter-priority" onchange="applyFilters()">
+    <select id="filter-priority" name="priority"
+            hx-get="/notifications/fragment"
+            hx-target="#notification-list"
+            hx-swap="innerHTML"
+            hx-include="[name='status']">
       <option value="">All priorities</option>
       <option value="critical" {% if filter_priority == 'critical' %}selected{% endif %}>Critical</option>
       <option value="high" {% if filter_priority == 'high' %}selected{% endif %}>High</option>
       <option value="medium" {% if filter_priority == 'medium' %}selected{% endif %}>Medium</option>
       <option value="low" {% if filter_priority == 'low' %}selected{% endif %}>Low</option>
     </select>
+    <input type="search" id="search-input" class="search-input"
+           placeholder="Search…" oninput="filterBySearch(this.value)">
   </div>
 </div>
 
-<div id="notification-list" class="notification-list">
-  {% for n in notifications %}
-  <div class="notification {{ n.priority }} {{ n.status }}" data-id="{{ n.id }}">
-    <div class="notification-header">
-      <span class="priority-badge {{ n.priority }}">{{ n.priority }}</span>
-      <span class="notification-title">{{ n.title }}</span>
-      <span class="notification-meta">
-        {% if n.source %}<span class="source">{{ n.source }}</span>{% endif %}
-        <time datetime="{{ n.created_at }}">{{ n.created_at.strftime('%b %d, %H:%M') }}</time>
-      </span>
-    </div>
-    {% if n.message %}
-    <div class="notification-body">{{ n.message }}</div>
-    {% endif %}
-    <div class="notification-actions">
-      {% if n.status == 'unread' %}
-      <button class="btn btn-small" onclick="markAs('{{ n.id }}', 'read')">Mark read</button>
-      {% elif n.status == 'read' %}
-      <button class="btn btn-small btn-ghost" onclick="markAs('{{ n.id }}', 'archived')">Archive</button>
-      <button class="btn btn-small btn-ghost" onclick="markAs('{{ n.id }}', 'unread')">Mark unread</button>
-      {% else %}
-      <button class="btn btn-small btn-ghost" onclick="markAs('{{ n.id }}', 'unread')">Restore</button>
-      {% endif %}
-      <button class="btn btn-small btn-danger" onclick="deleteNotification('{{ n.id }}')">Delete</button>
-    </div>
-  </div>
-  {% endfor %}
+<div id="bulk-actions" class="bulk-actions" style="display:none">
+  <span id="bulk-count" class="bulk-count">0 selected</span>
+  <button class="btn btn-small" onclick="bulkMarkRead()">Read marked</button>
+  <button class="btn btn-small btn-danger" onclick="bulkDelete()">Delete marked</button>
+  <button class="btn btn-small btn-ghost" onclick="selectAll()">Select all visible</button>
+  <button class="btn btn-small btn-ghost" onclick="clearSelection()">Clear</button>
+</div>
 
-  {% if not notifications %}
-  <div class="empty-state">
-    <p>No notifications yet.</p>
-    <p class="muted">Notifications sent via the API will appear here in real time.</p>
-  </div>
-  {% endif %}
+<div id="notification-list" class="notification-list"
+     hx-get="/notifications/fragment"
+     hx-trigger="load"
+     hx-swap="innerHTML"
+     hx-include="[name='status'],[name='priority']">
 </div>
 
 <div id="add-notification-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeAddNotification()">
@@ -95,21 +84,27 @@
     </form>
   </div>
 </div>
-
-<div class="pagination">
-  {% if offset > 0 %}
-  <a href="/?offset={{ offset - limit }}&limit={{ limit }}{% if filter_status %}&status={{ filter_status }}{% endif %}{% if filter_priority %}&priority={{ filter_priority }}{% endif %}" class="btn btn-small">Previous</a>
-  {% endif %}
-  {% if total > offset + limit %}
-  <a href="/?offset={{ offset + limit }}&limit={{ limit }}{% if filter_status %}&status={{ filter_status }}{% endif %}{% if filter_priority %}&priority={{ filter_priority }}{% endif %}" class="btn btn-small">Next</a>
-  {% endif %}
-  <span class="muted">{{ total }} total</span>
-</div>
 {% endblock %}
 
 {% block scripts %}
 <script src="/static/app.js"></script>
 <script>
   initSSE();
+
+  document.getElementById('notification-list').addEventListener('change', (e) => {
+    if (e.target.classList.contains('notif-checkbox')) updateBulkBar();
+  });
+
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    if (e.detail.target.id === 'notification-list') {
+      updateBulkBar();
+      const status = document.getElementById('filter-status').value;
+      const priority = document.getElementById('filter-priority').value;
+      const params = new URLSearchParams();
+      if (status) params.set('status', status);
+      if (priority) params.set('priority', priority);
+      history.pushState({}, '', '/?' + params.toString());
+    }
+  });
 </script>
 {% endblock %}

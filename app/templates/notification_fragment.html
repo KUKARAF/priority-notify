@@ -1,0 +1,47 @@
+{% for n in notifications %}
+<div class="notification {{ n.priority.value }} {{ n.status.value }}"
+     data-id="{{ n.id }}"
+     data-title="{{ n.title | e }}"
+     data-message="{{ n.message | e if n.message else '' }}"
+     data-source="{{ n.source | e if n.source else '' }}">
+  <label class="notif-checkbox-label">
+    <input type="checkbox" class="notif-checkbox" value="{{ n.id }}">
+  </label>
+  <div class="notification-header">
+    <span class="priority-badge {{ n.priority.value }}">{{ n.priority.value }}</span>
+    <span class="notification-title">{{ n.title }}</span>
+    <span class="notification-meta">
+      {% if n.source %}<span class="source">{{ n.source }}</span>{% endif %}
+      <time datetime="{{ n.created_at.isoformat() }}">{{ n.created_at.strftime('%b %d, %H:%M') }}</time>
+    </span>
+  </div>
+  {% if n.message %}
+  <div class="notification-body">{{ n.message }}</div>
+  {% endif %}
+  <div class="notification-actions">
+    {% if n.status.value == 'unread' %}
+    <button class="btn btn-small" onclick="markAs('{{ n.id }}', 'read')">Mark read</button>
+    {% elif n.status.value == 'read' %}
+    <button class="btn btn-small btn-ghost" onclick="markAs('{{ n.id }}', 'archived')">Archive</button>
+    <button class="btn btn-small btn-ghost" onclick="markAs('{{ n.id }}', 'unread')">Mark unread</button>
+    {% else %}
+    <button class="btn btn-small btn-ghost" onclick="markAs('{{ n.id }}', 'unread')">Restore</button>
+    {% endif %}
+    <button class="btn btn-small btn-danger" onclick="deleteNotification('{{ n.id }}')">Delete</button>
+  </div>
+</div>
+{% endfor %}
+
+{% if has_more %}
+<div class="load-sentinel"
+     hx-get="/notifications/fragment"
+     hx-trigger="intersect once"
+     hx-swap="outerHTML"
+     hx-include="[name='status'],[name='priority']"
+     hx-vals='{"offset": "{{ next_offset }}", "limit": "{{ limit }}"}'></div>
+{% elif not notifications %}
+<div class="empty-state">
+  <p>No notifications yet.</p>
+  <p class="muted">Notifications sent via the API will appear here in real time.</p>
+</div>
+{% endif %}

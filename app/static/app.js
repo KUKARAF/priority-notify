@@ -24,19 +24,24 @@ function prependNotification(n) {
   const list = document.getElementById('notification-list');
   if (!list) return;
 
-  // Remove empty state if present
   const empty = list.querySelector('.empty-state');
   if (empty) empty.remove();
 
   const el = document.createElement('div');
   el.className = `notification ${n.priority} ${n.status} notification-new`;
   el.dataset.id = n.id;
+  el.dataset.title = n.title;
+  el.dataset.message = n.message || '';
+  el.dataset.source = n.source || '';
 
   const created = new Date(n.created_at);
   const timeStr = created.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     + ', ' + created.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 
   el.innerHTML = `
+    <label class="notif-checkbox-label">
+      <input type="checkbox" class="notif-checkbox" value="${n.id}">
+    </label>
     <div class="notification-header">
       <span class="priority-badge ${n.priority}">${n.priority}</span>
       <span class="notification-title">${escapeHtml(n.title)}</span>
@@ -53,6 +58,7 @@ function prependNotification(n) {
   `;
 
   list.prepend(el);
+  updateBulkBar();
 }
 
 function updateNotificationStatus(id, status) {
@@ -195,13 +201,91 @@ function generateQR(text, container) {
   container.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(text)}" alt="QR Code" width="180" height="180">`;
 }
 
-// === Filter ===
+// === Search ===
 
-function applyFilters() {
-  const status = document.getElementById('filter-status').value;
-  const priority = document.getElementById('filter-priority').value;
-  const params = new URLSearchParams();
-  if (status) params.set('status', status);
-  if (priority) params.set('priority', priority);
-  window.location.href = '/?' + params.toString();
+function filterBySearch(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('#notification-list .notification').forEach(el => {
+    const title = (el.dataset.title || '').toLowerCase();
+    const message = (el.dataset.message || '').toLowerCase();
+    const source = (el.dataset.source || '').toLowerCase();
+    const matches = !q || title.includes(q) || message.includes(q) || source.includes(q);
+    el.style.display = matches ? '' : 'none';
+  });
+  updateBulkBar();
+}
+
+// === Multi-select & bulk actions ===
+
+function updateBulkBar() {
+  const checked = document.querySelectorAll('#notification-list .notif-checkbox:checked');
+  const bar = document.getElementById('bulk-actions');
+  const countEl = document.getElementById('bulk-count');
+  if (!bar) return;
+  bar.style.display = checked.length > 0 ? 'flex' : 'none';
+  if (countEl) countEl.textContent = `${checked.length} selected`;
+}
+
+function selectAll() {
+  document.querySelectorAll('#notification-list .notification').forEach(el => {
+    if (el.style.display !== 'none') {
+      const cb = el.querySelector('.notif-checkbox');
+      if (cb) cb.checked = true;
+    }
+  });
+  updateBulkBar();
+}
+
+function clearSelection() {
+  document.querySelectorAll('#notification-list .notif-checkbox:checked').forEach(cb => {
+    cb.checked = false;
+  });
+  updateBulkBar();
+}
+
+async function bulkMarkRead() {
+  const checked = [...document.querySelectorAll('#notification-list .notif-checkbox:checked')];
+  if (!checked.length) return;
+  const ids = checked.map(cb => cb.value);
+
+  const results = await Promise.allSettled(
+    ids.map(id =>
+      fetch(`/api/notifications/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'read' }),
+      })
+    )
+  );
+
+  results.forEach((result, i) => {
+    if (result.status === 'fulfilled' && result.value.ok) {
+      updateNotificationStatus(ids[i], 'read');
+      checked[i].checked = false;
+    }
+  });
+
+  updateBulkBar();
+}
+
+async function bulkDelete() {
+  const checked = [...document.querySelectorAll('#notification-list .notif-checkbox:checked')];
+  if (!checked.length) return;
+  const n = checked.length;
+  if (!confirm(`Delete ${n} notification${n > 1 ? 's' : ''}?`)) return;
+
+  const ids = checked.map(cb => cb.value);
+
+  const results = await Promise.allSettled(
+    ids.map(id => fetch(`/api/notifications/${id}`, { method: 'DELETE' }))
+  );
+
+  results.forEach((result, i) => {
+    if (result.status === 'fulfilled' && result.value.ok) {
+      const el = document.querySelector(`.notification[data-id="${ids[i]}"]`);
+      if (el) el.remove();
+    }
+  });
+
+  updateBulkBar();
 }

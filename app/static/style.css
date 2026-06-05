@@ -146,6 +146,7 @@ body {
   padding: 0.875rem 1rem;
   border-left: 3px solid var(--low);
   transition: background 0.15s;
+  position: relative;
 }
 
 .notification:hover { background: var(--surface-hover); }
@@ -162,6 +163,7 @@ body {
   align-items: center;
   gap: 0.625rem;
   flex-wrap: wrap;
+  padding-right: 1.75rem;
 }
 
 .priority-badge {
@@ -415,6 +417,63 @@ body {
 }
 
 .notification-new { animation: slideIn 0.3s ease-out; }
+
+/* === Search input === */
+.search-input {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8rem;
+  width: 220px;
+  transition: border-color 0.15s;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* === Notification checkbox === */
+.notif-checkbox-label {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.notif-checkbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* === Bulk actions bar === */
+.bulk-actions {
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.875rem;
+  background: var(--surface);
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.bulk-count {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-right: 0.25rem;
+}
+
+/* === Infinite scroll sentinel === */
+.load-sentinel {
+  height: 1px;
+  visibility: hidden;
+}
 
 /* === Responsive === */
 @media (max-width: 640px) {
