@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -145,12 +146,31 @@ async def _authenticate_token(request: Request, db: AsyncSession) -> ClientToken
     if not raw_token:
         return None
 
-    # Look up all tokens and bcrypt-verify (bcrypt hashes aren't searchable)
-    result = await db.execute(select(ClientToken))
+    lookup = lookup_hash(raw_token)
+    result = await db.execute(select(ClientToken).where(ClientToken.token_lookup == lookup))
+    ct = result.scalar_one_or_none()
+
+    if ct is None:
+        ct = await _match_legacy_token(db, raw_token, lookup)
+        if ct is None:
+            return None
+
+    ct.last_used_at = datetime.now(UTC)
+    await db.commit()
+    return ct
+
+
+async def _match_legacy_token(db: AsyncSession, raw_token: str, lookup: str) -> ClientToken | None:
+    """Fallback for tokens created before `token_lookup` existed.
+
+    Only rows without a lookup hash are scanned and bcrypt-verified; on a match we
+    backfill the lookup hash so every later request for that token is O(1). The scan
+    shrinks to nothing as legacy tokens are used at least once.
+    """
+    result = await db.execute(select(ClientToken).where(ClientToken.token_lookup.is_(None)))
     for ct in result.scalars().all():
         if bcrypt.checkpw(raw_token.encode(), ct.token_hash.encode()):
-            ct.last_used_at = datetime.now(UTC)
-            await db.commit()
+            ct.token_lookup = lookup
             return ct
     return None
 
@@ -226,13 +246,23 @@ async def _authenticate_management_key(request: Request, db: AsyncSession) -> Ma
     if not raw_key:
         return None
 
-    result = await db.execute(select(ManagementKey))
-    for mk in result.scalars().all():
-        if bcrypt.checkpw(raw_key.encode(), mk.key_hash.encode()):
-            mk.last_used_at = datetime.now(UTC)
-            await db.commit()
-            return mk
-    return None
+    lookup = lookup_hash(raw_key)
+    result = await db.execute(select(ManagementKey).where(ManagementKey.key_lookup == lookup))
+    mk = result.scalar_one_or_none()
+
+    if mk is None:
+        result = await db.execute(select(ManagementKey).where(ManagementKey.key_lookup.is_(None)))
+        for candidate in result.scalars().all():
+            if bcrypt.checkpw(raw_key.encode(), candidate.key_hash.encode()):
+                candidate.key_lookup = lookup
+                mk = candidate
+                break
+        if mk is None:
+            return None
+
+    mk.last_used_at = datetime.now(UTC)
+    await db.commit()
+    return mk
 
 
 async def require_session_or_management_key(
@@ -269,3 +299,15 @@ def generate_api_token() -> str:
 
 def hash_token(token: str) -> str:
     return bcrypt.hashpw(token.encode(), bcrypt.gensalt()).decode()
+
+
+def lookup_hash(token: str) -> str:
+    """Fast, indexable SHA-256 of a token, used to find its row in O(1).
+
+    API tokens are 256-bit random (`generate_api_token`), so a plain cryptographic
+    hash is preimage-resistant and safe to store and match on — bcrypt's slow work
+    factor only buys anything against *low-entropy* secrets like passwords. Matching a
+    full SHA-256 of the presented token is itself proof the caller holds the token, so
+    this replaces the previous scan-every-row-and-bcrypt approach on the hot path.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()

@@ -79,6 +79,11 @@ class ClientToken(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
     token_hash: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # SHA-256 of the raw token for O(1) indexed lookup (see auth.lookup_hash).
+    # Nullable so tokens created before this column can be backfilled on first use.
+    token_lookup: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True
+    )
     name: Mapped[str] = mapped_column(String(255))
     device_type: Mapped[DeviceType] = mapped_column(Enum(DeviceType), default=DeviceType.other)
     scope: Mapped[TokenScope] = mapped_column(
@@ -99,6 +104,10 @@ class ManagementKey(Base):
         String(36), ForeignKey("users.id"), unique=True, index=True
     )
     key_hash: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # SHA-256 of the raw key for O(1) indexed lookup (see auth.lookup_hash).
+    key_lookup: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

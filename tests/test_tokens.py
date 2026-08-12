@@ -1,7 +1,10 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User
+from app.auth import hash_token, lookup_hash
+from app.models import ClientToken, User
 
 
 @pytest.mark.asyncio
@@ -277,3 +280,51 @@ async def test_management_key_revoke(
     assert (await client.get("/api/tokens/management-key", cookies=cookies)).json()[
         "exists"
     ] is False
+
+
+# --- Lookup-hash fast path (O(1) auth) ---
+
+
+@pytest.mark.asyncio
+async def test_created_token_has_lookup_hash(
+    client: AsyncClient, test_user: User, session_cookie: str, db: AsyncSession
+) -> None:
+    resp = await client.post(
+        "/api/tokens/",
+        json={"name": "Fast"},
+        cookies={"session": session_cookie},
+    )
+    assert resp.status_code == 201
+    plaintext = resp.json()["token"]
+    token_id = resp.json()["id"]
+
+    row = (await db.execute(select(ClientToken).where(ClientToken.id == token_id))).scalar_one()
+    assert row.token_lookup == lookup_hash(plaintext)
+
+
+@pytest.mark.asyncio
+async def test_legacy_token_without_lookup_authenticates_and_backfills(
+    client: AsyncClient, test_user: User, db: AsyncSession
+) -> None:
+    # Simulate a token created before token_lookup existed: bcrypt hash only.
+    plaintext = "legacy-plaintext-token-000000000000"
+    legacy = ClientToken(
+        user_id=test_user.id,
+        token_hash=hash_token(plaintext),
+        token_lookup=None,
+        name="Legacy",
+    )
+    db.add(legacy)
+    await db.commit()
+
+    # Authenticates via the bcrypt fallback (default scope is write → can POST).
+    resp = await client.post(
+        "/api/notifications/",
+        json={"title": "from legacy"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201
+
+    # ...and the lookup hash is backfilled, so future auth is O(1).
+    await db.refresh(legacy)
+    assert legacy.token_lookup == lookup_hash(plaintext)

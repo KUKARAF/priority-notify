@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import (
     generate_api_token,
     hash_token,
+    lookup_hash,
     require_session,
     require_session_or_management_key,
 )
@@ -40,7 +41,11 @@ async def create_management_key(
         )
 
     plaintext = generate_api_token()
-    key = ManagementKey(user_id=user.id, key_hash=hash_token(plaintext))
+    key = ManagementKey(
+        user_id=user.id,
+        key_hash=hash_token(plaintext),
+        key_lookup=lookup_hash(plaintext),
+    )
     db.add(key)
     await db.commit()
     await db.refresh(key)
@@ -105,6 +110,7 @@ async def create_token(
     token = ClientToken(
         user_id=user.id,
         token_hash=hashed,
+        token_lookup=lookup_hash(plaintext),
         name=payload.name,
         device_type=payload.device_type,
         scope=payload.scope,
