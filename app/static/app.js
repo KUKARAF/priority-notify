@@ -138,11 +138,12 @@ async function createToken(e) {
   e.preventDefault();
   const name = document.getElementById('token-name').value;
   const device_type = document.getElementById('token-type').value;
+  const scope = document.getElementById('token-scope').value;
 
   const resp = await fetch('/api/tokens/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, device_type }),
+    body: JSON.stringify({ name, device_type, scope }),
   });
 
   if (!resp.ok) {
@@ -190,6 +191,41 @@ async function revokeToken(id, name) {
     const row = document.querySelector(`tr[data-id="${id}"]`);
     if (row) row.remove();
   }
+}
+
+// === Management key ===
+
+async function generateManagementKey() {
+  const resp = await fetch('/api/tokens/management-key', { method: 'POST' });
+  if (!resp.ok) {
+    alert(resp.status === 409 ? 'A management key already exists. Revoke it first.' : 'Failed to generate management key');
+    return;
+  }
+  const data = await resp.json();
+  const display = document.getElementById('new-management-key-display');
+  document.getElementById('new-management-key-value').textContent = data.key;
+  display.style.display = 'block';
+  display.scrollIntoView({ behavior: 'smooth' });
+}
+
+function dismissManagementKey() {
+  document.getElementById('new-management-key-display').style.display = 'none';
+  location.reload();
+}
+
+function copyManagementKey() {
+  const value = document.getElementById('new-management-key-value').textContent;
+  navigator.clipboard.writeText(value).then(() => {
+    const btn = event.target;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+
+async function revokeManagementKey() {
+  if (!confirm('Revoke the management key? Any automation using it will lose access.')) return;
+  const resp = await fetch('/api/tokens/management-key', { method: 'DELETE' });
+  if (resp.ok) location.reload();
 }
 
 // === QR Code (simple approach: use an img pointing to a data URL) ===

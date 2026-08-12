@@ -15,6 +15,7 @@ async def test_create_token(client: AsyncClient, test_user: User, session_cookie
     data = resp.json()
     assert data["name"] == "My Phone"
     assert data["device_type"] == "android"
+    assert data["scope"] == "write"  # default
     assert "token" in data
     assert len(data["token"]) > 20
 
@@ -108,3 +109,171 @@ async def test_created_token_works_for_api(
     )
     assert resp.status_code == 201
     assert resp.json()["user_id"] == test_user.id
+
+
+# --- Token scopes ---
+
+
+async def _make_token(client: AsyncClient, session_cookie: str, scope: str) -> str:
+    resp = await client.post(
+        "/api/tokens/",
+        json={"name": f"{scope} token", "scope": scope},
+        cookies={"session": session_cookie},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["scope"] == scope
+    return resp.json()["token"]
+
+
+async def _make_notification(client: AsyncClient, session_cookie: str) -> str:
+    resp = await client.post(
+        "/api/notifications/",
+        json={"title": "seed"},
+        cookies={"session": session_cookie},
+    )
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_write_scope_can_create_but_not_read_or_delete(
+    client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    token = await _make_token(client, session_cookie, "write")
+    note_id = await _make_notification(client, session_cookie)
+    h = {"Authorization": f"Bearer {token}"}
+
+    assert (
+        await client.post("/api/notifications/", json={"title": "x"}, headers=h)
+    ).status_code == 201
+    assert (await client.get("/api/notifications/", headers=h)).status_code == 403
+    assert (await client.delete(f"/api/notifications/{note_id}", headers=h)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_read_scope_can_read_and_patch_but_not_write_or_delete(
+    client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    token = await _make_token(client, session_cookie, "read")
+    note_id = await _make_notification(client, session_cookie)
+    h = {"Authorization": f"Bearer {token}"}
+
+    assert (await client.get("/api/notifications/", headers=h)).status_code == 200
+    assert (
+        await client.patch(f"/api/notifications/{note_id}", json={"status": "read"}, headers=h)
+    ).status_code == 200
+    assert (
+        await client.post("/api/notifications/", json={"title": "x"}, headers=h)
+    ).status_code == 403
+    assert (await client.delete(f"/api/notifications/{note_id}", headers=h)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_delete_scope_can_delete_only(
+    client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    token = await _make_token(client, session_cookie, "delete")
+    note_id = await _make_notification(client, session_cookie)
+    h = {"Authorization": f"Bearer {token}"}
+
+    assert (await client.get("/api/notifications/", headers=h)).status_code == 403
+    assert (
+        await client.post("/api/notifications/", json={"title": "x"}, headers=h)
+    ).status_code == 403
+    assert (await client.delete(f"/api/notifications/{note_id}", headers=h)).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_full_scope_can_do_everything(
+    client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    token = await _make_token(client, session_cookie, "full")
+    note_id = await _make_notification(client, session_cookie)
+    h = {"Authorization": f"Bearer {token}"}
+
+    assert (await client.get("/api/notifications/", headers=h)).status_code == 200
+    assert (
+        await client.post("/api/notifications/", json={"title": "x"}, headers=h)
+    ).status_code == 201
+    assert (
+        await client.patch(f"/api/notifications/{note_id}", json={"status": "read"}, headers=h)
+    ).status_code == 200
+    assert (await client.delete(f"/api/notifications/{note_id}", headers=h)).status_code == 204
+
+
+# --- Management key ---
+
+
+@pytest.mark.asyncio
+async def test_management_key_generate_and_singleton(
+    client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    cookies = {"session": session_cookie}
+
+    # None exists initially
+    status = await client.get("/api/tokens/management-key", cookies=cookies)
+    assert status.status_code == 200
+    assert status.json()["exists"] is False
+
+    resp = await client.post("/api/tokens/management-key", cookies=cookies)
+    assert resp.status_code == 201
+    assert len(resp.json()["key"]) > 20
+
+    # Only one allowed
+    dup = await client.post("/api/tokens/management-key", cookies=cookies)
+    assert dup.status_code == 409
+
+    status = await client.get("/api/tokens/management-key", cookies=cookies)
+    assert status.json()["exists"] is True
+
+
+@pytest.mark.asyncio
+async def test_management_key_can_manage_tokens(
+    client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    mgmt = (
+        await client.post("/api/tokens/management-key", cookies={"session": session_cookie})
+    ).json()["key"]
+    h = {"Authorization": f"Bearer {mgmt}"}
+
+    # Create a token programmatically
+    created = await client.post("/api/tokens/", json={"name": "prog", "scope": "read"}, headers=h)
+    assert created.status_code == 201
+    assert created.json()["scope"] == "read"
+    token_id = created.json()["id"]
+
+    # List
+    listed = await client.get("/api/tokens/", headers=h)
+    assert listed.status_code == 200
+    assert any(t["id"] == token_id for t in listed.json())
+
+    # Revoke
+    assert (await client.delete(f"/api/tokens/{token_id}", headers=h)).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_management_key_cannot_send_notifications(
+    client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    mgmt = (
+        await client.post("/api/tokens/management-key", cookies={"session": session_cookie})
+    ).json()["key"]
+    h = {"Authorization": f"Bearer {mgmt}"}
+
+    # A management key is not a client token — it can't authenticate the notifications API
+    resp = await client.post("/api/notifications/", json={"title": "nope"}, headers=h)
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_management_key_revoke(
+    client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    cookies = {"session": session_cookie}
+    await client.post("/api/tokens/management-key", cookies=cookies)
+
+    assert (await client.delete("/api/tokens/management-key", cookies=cookies)).status_code == 204
+    assert (await client.delete("/api/tokens/management-key", cookies=cookies)).status_code == 404
+    assert (await client.get("/api/tokens/management-key", cookies=cookies)).json()[
+        "exists"
+    ] is False

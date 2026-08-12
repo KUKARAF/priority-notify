@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user_from_session
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import ClientToken, Notification, Priority, Status, User
+from app.models import ClientToken, ManagementKey, Notification, Priority, Status, User
+from app.schemas import ManagementKeyStatus
 
 router = APIRouter(tags=["frontend"])
 templates = Jinja2Templates(directory="app/templates")
@@ -108,12 +109,23 @@ async def tokens_page(
     )
     tokens = result.scalars().all()
 
+    mk_result = await db.execute(select(ManagementKey).where(ManagementKey.user_id == user.id))
+    mk = mk_result.scalar_one_or_none()
+    mgmt_key = (
+        ManagementKeyStatus(exists=False)
+        if mk is None
+        else ManagementKeyStatus(
+            exists=True, created_at=mk.created_at, last_used_at=mk.last_used_at
+        )
+    )
+
     return templates.TemplateResponse(
         request,
         "tokens.html",
         {
             "user": user,
             "tokens": tokens,
+            "mgmt_key": mgmt_key,
             "active": "tokens",
         },
     )

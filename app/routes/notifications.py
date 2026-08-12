@@ -8,9 +8,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.auth import get_current_user
+from app.auth import require_scope
 from app.database import get_db
-from app.models import Notification, Priority, Status, User
+from app.models import Notification, Priority, Status, TokenScope, User
 from app.schemas import (
     NotificationCreate,
     NotificationResponse,
@@ -48,7 +48,7 @@ async def list_notifications(
     source: str | None = None,
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_scope(TokenScope.read)),
     db: AsyncSession = Depends(get_db),
 ) -> PaginatedResponse[NotificationResponse]:
     query = select(Notification).where(Notification.user_id == user.id)
@@ -84,7 +84,7 @@ async def create_notification(
     payload: NotificationCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_scope(TokenScope.write)),
 ) -> NotificationResponse:
     notification = Notification(
         user_id=user.id,
@@ -109,7 +109,7 @@ async def create_notification(
 @router.get("/stream")
 async def stream_notifications(
     request: Request,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_scope(TokenScope.read)),
 ) -> EventSourceResponse:
     queue = broker.subscribe(user.id)
 
@@ -132,7 +132,7 @@ async def stream_notifications(
 @router.get("/{notification_id}", response_model=NotificationResponse)
 async def get_notification(
     notification_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_scope(TokenScope.read)),
     db: AsyncSession = Depends(get_db),
 ) -> NotificationResponse:
     result = await db.execute(
@@ -150,7 +150,7 @@ async def get_notification(
 async def update_notification(
     notification_id: str,
     payload: NotificationUpdate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_scope(TokenScope.read)),
     db: AsyncSession = Depends(get_db),
 ) -> NotificationResponse:
     result = await db.execute(
@@ -183,7 +183,7 @@ async def update_notification(
 @router.delete("/{notification_id}", status_code=204)
 async def delete_notification(
     notification_id: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_scope(TokenScope.delete)),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     result = await db.execute(

@@ -1,4 +1,6 @@
 import secrets
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import bcrypt
@@ -13,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import ClientToken, User
+from app.models import ClientToken, ManagementKey, TokenScope, User
 
 log = structlog.get_logger()
 
@@ -131,25 +133,37 @@ async def get_current_user_from_session(
     return result.scalar_one_or_none()
 
 
+def _bearer_token(request: Request) -> str | None:
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    return auth_header[7:]
+
+
+async def _authenticate_token(request: Request, db: AsyncSession) -> ClientToken | None:
+    raw_token = _bearer_token(request)
+    if not raw_token:
+        return None
+
+    # Look up all tokens and bcrypt-verify (bcrypt hashes aren't searchable)
+    result = await db.execute(select(ClientToken))
+    for ct in result.scalars().all():
+        if bcrypt.checkpw(raw_token.encode(), ct.token_hash.encode()):
+            ct.last_used_at = datetime.now(UTC)
+            await db.commit()
+            return ct
+    return None
+
+
 async def get_current_user_from_token(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    ct = await _authenticate_token(request, db)
+    if not ct:
         return None
-    raw_token = auth_header[7:]
-
-    # Look up all tokens and bcrypt-verify (bcrypt hashes aren't searchable)
-    result = await db.execute(select(ClientToken))
-    tokens = result.scalars().all()
-    for ct in tokens:
-        if bcrypt.checkpw(raw_token.encode(), ct.token_hash.encode()):
-            ct.last_used_at = datetime.now(UTC)
-            await db.commit()
-            user_result = await db.execute(select(User).where(User.id == ct.user_id))
-            return user_result.scalar_one_or_none()
-    return None
+    user_result = await db.execute(select(User).where(User.id == ct.user_id))
+    return user_result.scalar_one_or_none()
 
 
 async def get_current_user(
@@ -164,6 +178,78 @@ async def get_current_user(
     if user:
         return user
     raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+# --- Token scope enforcement ---
+
+
+@dataclass
+class AuthContext:
+    user: User
+    token: ClientToken | None  # None => browser session => unrestricted (full access)
+
+
+async def get_auth_context(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> AuthContext:
+    user = await get_current_user_from_session(request, db, settings)
+    if user:
+        return AuthContext(user=user, token=None)
+    ct = await _authenticate_token(request, db)
+    if ct:
+        user_result = await db.execute(select(User).where(User.id == ct.user_id))
+        user = user_result.scalar_one_or_none()
+        if user:
+            return AuthContext(user=user, token=ct)
+    raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+def require_scope(*allowed: TokenScope) -> Callable[..., Awaitable[User]]:
+    async def dependency(ctx: AuthContext = Depends(get_auth_context)) -> User:
+        token = ctx.token
+        if token is not None and token.scope != TokenScope.full and token.scope not in allowed:
+            raise HTTPException(
+                status_code=403, detail="Token scope insufficient for this operation"
+            )
+        return ctx.user
+
+    return dependency
+
+
+# --- Management key ---
+
+
+async def _authenticate_management_key(request: Request, db: AsyncSession) -> ManagementKey | None:
+    raw_key = _bearer_token(request)
+    if not raw_key:
+        return None
+
+    result = await db.execute(select(ManagementKey))
+    for mk in result.scalars().all():
+        if bcrypt.checkpw(raw_key.encode(), mk.key_hash.encode()):
+            mk.last_used_at = datetime.now(UTC)
+            await db.commit()
+            return mk
+    return None
+
+
+async def require_session_or_management_key(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> User:
+    user = await get_current_user_from_session(request, db, settings)
+    if user:
+        return user
+    mk = await _authenticate_management_key(request, db)
+    if mk:
+        user_result = await db.execute(select(User).where(User.id == mk.user_id))
+        user = user_result.scalar_one_or_none()
+        if user:
+            return user
+    raise HTTPException(status_code=401, detail="Session or management key required")
 
 
 async def require_session(

@@ -20,4 +20,7 @@ RUN mkdir -p /app/data
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Apply DB migrations before serving. `alembic upgrade head` is idempotent (no-op when
+# already at head), so this is safe on every deploy and keeps the schema in lockstep with
+# the image. Fails fast if a migration errors rather than serving against a stale schema.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]

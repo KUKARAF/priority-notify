@@ -3,7 +3,7 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
-from app.models import DeviceType, Priority, Status
+from app.models import DeviceType, Priority, Status, TokenScope
 
 T = TypeVar("T")
 
@@ -46,6 +46,7 @@ class NotificationResponse(BaseModel):
 class TokenCreate(BaseModel):
     name: str = Field(max_length=255)
     device_type: DeviceType = DeviceType.other
+    scope: TokenScope = TokenScope.write
 
 
 class TokenResponse(BaseModel):
@@ -54,6 +55,7 @@ class TokenResponse(BaseModel):
     id: str
     name: str
     device_type: DeviceType
+    scope: TokenScope
     last_used_at: datetime | None
     created_at: datetime
     expires_at: datetime | None
@@ -61,6 +63,22 @@ class TokenResponse(BaseModel):
 
 class TokenCreatedResponse(TokenResponse):
     token: str  # plaintext, shown only once
+
+
+# --- Management key ---
+
+
+class ManagementKeyStatus(BaseModel):
+    model_config = {"from_attributes": True}
+
+    exists: bool
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
+
+
+class ManagementKeyCreated(BaseModel):
+    created_at: datetime
+    key: str  # plaintext, shown only once
 
 
 # --- User ---

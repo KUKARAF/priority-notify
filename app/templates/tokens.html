@@ -22,6 +22,15 @@
           <option value="other" selected>Other</option>
         </select>
       </div>
+      <div class="form-group">
+        <label for="token-scope">Permissions</label>
+        <select id="token-scope" name="scope">
+          <option value="write" selected>Write only (send)</option>
+          <option value="read">Read only</option>
+          <option value="delete">Delete only</option>
+          <option value="full">Full access (not recommended)</option>
+        </select>
+      </div>
       <div class="form-group form-action">
         <button type="submit" class="btn btn-primary">Create token</button>
       </div>
@@ -48,6 +57,7 @@
       <tr>
         <th>Name</th>
         <th>Type</th>
+        <th>Permissions</th>
         <th>Created</th>
         <th>Last used</th>
         <th></th>
@@ -58,6 +68,7 @@
       <tr data-id="{{ t.id }}">
         <td class="token-name">{{ t.name }}</td>
         <td><span class="device-badge {{ t.device_type }}">{{ t.device_type }}</span></td>
+        <td><span class="scope-badge {{ t.scope }}">{{ t.scope }}</span></td>
         <td><time datetime="{{ t.created_at }}">{{ t.created_at.strftime('%b %d, %Y') }}</time></td>
         <td>
           {% if t.last_used_at %}
@@ -80,6 +91,43 @@
   </div>
   {% endif %}
 </section>
+
+<section class="card">
+  <h2>Management key</h2>
+  <p class="muted">
+    A single management key that can create, list, and revoke API tokens
+    programmatically (like an OpenRouter provisioning key). Only one can exist at a time.
+  </p>
+
+  <div id="management-key-status">
+    {% if mgmt_key.exists %}
+    <p>
+      Active — created
+      <time datetime="{{ mgmt_key.created_at }}">{{ mgmt_key.created_at.strftime('%b %d, %Y') }}</time>.
+      Last used:
+      {% if mgmt_key.last_used_at %}
+      <time datetime="{{ mgmt_key.last_used_at }}">{{ mgmt_key.last_used_at.strftime('%b %d, %H:%M') }}</time>
+      {% else %}
+      <span class="muted">Never</span>
+      {% endif %}
+    </p>
+    <button class="btn btn-small btn-danger" onclick="revokeManagementKey()">Revoke management key</button>
+    {% else %}
+    <p class="muted">No management key exists.</p>
+    <button class="btn btn-primary" onclick="generateManagementKey()">Generate management key</button>
+    {% endif %}
+  </div>
+</section>
+
+<div id="new-management-key-display" class="card token-reveal" style="display:none;">
+  <h2>Management key created</h2>
+  <p class="warning">Copy this key now — it won't be shown again.</p>
+  <div class="token-value-row">
+    <code id="new-management-key-value" class="token-value"></code>
+    <button class="btn btn-small" onclick="copyManagementKey()">Copy</button>
+  </div>
+  <button class="btn btn-ghost" onclick="dismissManagementKey()">Done</button>
+</div>
 {% endblock %}
 
 {% block scripts %}

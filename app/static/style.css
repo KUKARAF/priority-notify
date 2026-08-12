@@ -334,6 +334,20 @@ body {
   text-transform: capitalize;
 }
 
+.scope-badge {
+  font-size: 0.7rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  text-transform: capitalize;
+}
+
+.scope-badge.full {
+  border-color: var(--priority-high, #e0a000);
+  color: var(--priority-high, #e0a000);
+}
+
 /* === Empty state === */
 .empty-state {
   text-align: center;
