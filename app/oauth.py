@@ -1,8 +1,9 @@
-"""Built-in OAuth 2.1 authorization server for MCP clients (Claude, ChatGPT, ...).
+"""Built-in OAuth 2.1 authorization server for MCP clients (Claude, ChatGPT, LiteLLM, ...).
 
 Modelled on Grist's MCP sign-in: the assistant is a public client that identifies itself
-with a Client ID Metadata Document (CIMD) — its `client_id` is an https URL we fetch to
-learn its name and redirect URIs — restricted to an allowlist of hosts. The user signs in
+either with a Client ID Metadata Document (CIMD) — its `client_id` is an https URL we fetch
+to learn its name and redirect URIs — or by registering through Dynamic Client Registration
+(RFC 7591). Both are restricted to allowlists of hosts. The user signs in
 through the normal Authentik OIDC login, approves scopes on a consent screen, and the
 client gets opaque, prefixed access/refresh tokens. PKCE (S256) is mandatory.
 """
@@ -19,13 +20,14 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import lookup_hash
 from app.config import Settings
 from app.models import (
     OAuthAuthorizationCode,
+    OAuthClient,
     OAuthGrant,
     OAuthToken,
     OAuthTokenKind,
@@ -126,7 +128,16 @@ def validate_client_id_url(client_id: str, settings: Settings) -> None:
         raise InvalidClientError(f"Clients from {host or 'this host'} are not allowed")
 
 
-async def get_client_metadata(client_id: str, settings: Settings) -> ClientMetadata:
+async def get_client_metadata(
+    client_id: str, settings: Settings, db: AsyncSession
+) -> ClientMetadata:
+    """Resolve a client: a CIMD URL is fetched, anything else must be a DCR-registered client."""
+    if not client_id.startswith("https://"):
+        return await _get_registered_client(client_id, db)
+    return await _get_cimd_client(client_id, settings)
+
+
+async def _get_cimd_client(client_id: str, settings: Settings) -> ClientMetadata:
     validate_client_id_url(client_id, settings)
 
     cached = _cimd_cache.get(client_id)
@@ -183,6 +194,110 @@ def _parse_client_metadata(client_id: str, doc: object) -> ClientMetadata:
         client_uri=client_uri if isinstance(client_uri, str) else None,
         redirect_uris=tuple(redirect_uris),
     )
+
+
+# --- Dynamic Client Registration (RFC 7591) ---
+
+DCR_CLIENT_PREFIX = "pn_client_"
+# Registrations nobody ever authorized are dropped after this, so open registration can't
+# grow the table without bound.
+DCR_UNUSED_CLIENT_TTL = timedelta(days=1)
+
+
+class InvalidClientMetadataError(Exception):
+    def __init__(self, error: str, description: str) -> None:
+        super().__init__(description)
+        self.error = error
+        self.description = description
+
+
+async def _get_registered_client(client_id: str, db: AsyncSession) -> ClientMetadata:
+    client = await db.get(OAuthClient, client_id)
+    if client is None:
+        raise InvalidClientError("Unknown client_id")
+    return ClientMetadata(
+        client_id=client.id,
+        client_name=client.client_name,
+        client_uri=client.client_uri,
+        redirect_uris=tuple(client.redirect_uris),
+    )
+
+
+def _validate_registered_redirect_uri(uri: object, settings: Settings) -> str:
+    if not isinstance(uri, str):
+        raise InvalidClientMetadataError("invalid_redirect_uri", "redirect_uris must be strings")
+    parts = urlsplit(uri)
+    host = (parts.hostname or "").lower()
+    loopback = parts.scheme == "http" and host in _LOOPBACK_HOSTS
+    if parts.scheme != "https" and not loopback:
+        raise InvalidClientMetadataError(
+            "invalid_redirect_uri", f"{uri} must use https (http only for loopback)"
+        )
+    if parts.fragment or parts.username or parts.password:
+        raise InvalidClientMetadataError(
+            "invalid_redirect_uri", f"{uri} must not contain a fragment or credentials"
+        )
+    if host not in settings.dcr_allowed_redirect_hosts_list:
+        raise InvalidClientMetadataError(
+            "invalid_redirect_uri", f"Redirects to {host or 'this host'} are not allowed"
+        )
+    return uri
+
+
+async def register_client(
+    db: AsyncSession, settings: Settings, doc: object
+) -> tuple[OAuthClient, list[str]]:
+    """Validate an RFC 7591 registration request and store the new public client.
+
+    Returns the client and any requested-but-ignored metadata worth logging.
+    """
+    if not isinstance(doc, dict):
+        raise InvalidClientMetadataError("invalid_client_metadata", "Expected a JSON object")
+
+    redirect_uris = doc.get("redirect_uris")
+    if not isinstance(redirect_uris, list) or not redirect_uris:
+        raise InvalidClientMetadataError("invalid_redirect_uri", "redirect_uris is required")
+    uris = [_validate_registered_redirect_uri(u, settings) for u in redirect_uris]
+
+    grant_types = doc.get("grant_types", ["authorization_code"])
+    if not isinstance(grant_types, list) or not set(grant_types) <= {
+        "authorization_code",
+        "refresh_token",
+    }:
+        raise InvalidClientMetadataError(
+            "invalid_client_metadata", "Only authorization_code and refresh_token are supported"
+        )
+    response_types = doc.get("response_types", ["code"])
+    if not isinstance(response_types, list) or not set(response_types) <= {"code"}:
+        raise InvalidClientMetadataError(
+            "invalid_client_metadata", "Only response_type code is supported"
+        )
+
+    ignored = []
+    # Public clients only (PKCE is mandatory); RFC 7591 §3.2.1 lets the server substitute
+    # its own value, which we echo back so the client knows not to expect a secret.
+    if doc.get("token_endpoint_auth_method", "none") != "none":
+        ignored.append("token_endpoint_auth_method")
+
+    name = doc.get("client_name")
+    client_uri = doc.get("client_uri")
+    client = OAuthClient(
+        id=DCR_CLIENT_PREFIX + secrets.token_urlsafe(24),
+        client_name=name[:255] if isinstance(name, str) and name else "MCP client",
+        client_uri=client_uri if isinstance(client_uri, str) else None,
+        redirect_uris=uris,
+    )
+
+    await db.execute(
+        delete(OAuthClient).where(
+            OAuthClient.created_at < utcnow() - DCR_UNUSED_CLIENT_TTL,
+            ~exists().where(OAuthGrant.client_id == OAuthClient.id),
+        )
+    )
+    db.add(client)
+    await db.commit()
+    await db.refresh(client)
+    return client, ignored
 
 
 def redirect_uri_allowed(requested: str, registered: tuple[str, ...]) -> bool:

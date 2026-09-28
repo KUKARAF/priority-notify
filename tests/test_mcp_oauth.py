@@ -3,21 +3,24 @@ import hashlib
 import re
 import time
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from app import oauth
 from app.config import Settings, get_settings
 from app.main import app
-from app.models import ClientToken, TokenScope, User
+from app.models import ClientToken, OAuthClient, TokenScope, User
 from app.oauth import (
     ClientMetadata,
     InvalidClientError,
     _parse_client_metadata,
     redirect_uri_allowed,
+    utcnow,
     validate_client_id_url,
 )
 from app.routes.auth import _safe_next
@@ -454,3 +457,133 @@ async def test_full_api_token_can_read(
     await db.commit()
     resp = await _call(mcp_client, TEST_TOKEN_PLAINTEXT, "list_notifications")
     assert resp.json()["result"]["isError"] is False
+
+
+# --- Dynamic Client Registration ---
+
+LITELLM_REDIRECT = "https://litellm.osmosis.page/callback"
+
+
+@pytest.fixture
+async def dcr_client(client: AsyncClient) -> AsyncGenerator[AsyncClient]:
+    app.dependency_overrides[get_settings] = lambda: _settings(
+        OAUTH_DCR_ALLOWED_REDIRECT_HOSTS="litellm.osmosis.page,localhost"
+    )
+    yield client
+
+
+async def _register(client: AsyncClient, **overrides: Any) -> Any:
+    # The exact body LiteLLM sends.
+    body = {
+        "client_name": "Priority_notify",
+        "redirect_uris": [LITELLM_REDIRECT],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        **overrides,
+    }
+    return await client.post("/oauth/register", json=body)
+
+
+async def test_dcr_advertised_only_when_configured(
+    mcp_client: AsyncClient, dcr_client: AsyncClient
+) -> None:
+    meta = (await dcr_client.get("/.well-known/oauth-authorization-server")).json()
+    assert meta["registration_endpoint"] == "http://test/oauth/register"
+
+    app.dependency_overrides[get_settings] = lambda: _settings()
+    meta = (await dcr_client.get("/.well-known/oauth-authorization-server")).json()
+    assert "registration_endpoint" not in meta
+    assert (await _register(dcr_client)).status_code == 404
+
+
+async def test_dcr_rejects_unlisted_redirects(dcr_client: AsyncClient) -> None:
+    for uri in ["https://evil.example/callback", "http://litellm.osmosis.page/callback"]:
+        resp = await _register(dcr_client, redirect_uris=[uri])
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "invalid_redirect_uri"
+    resp = await _register(dcr_client, grant_types=["client_credentials"])
+    assert resp.json()["error"] == "invalid_client_metadata"
+    assert (await _register(dcr_client, redirect_uris=[])).status_code == 400
+
+
+async def test_dcr_full_flow(dcr_client: AsyncClient, test_user: User, session_cookie: str) -> None:
+    resp = await _register(dcr_client, token_endpoint_auth_method="client_secret_post")
+    assert resp.status_code == 201
+    reg = resp.json()
+    client_id = reg["client_id"]
+    assert client_id.startswith("pn_client_")
+    assert reg["token_endpoint_auth_method"] == "none"
+    assert "client_secret" not in reg
+
+    params = _authorize_params(client_id=client_id, redirect_uri=LITELLM_REDIRECT)
+    resp = await dcr_client.get(
+        "/oauth/authorize", params=params, cookies={"session": session_cookie}
+    )
+    assert resp.status_code == 200
+    assert "litellm.osmosis.page" in resp.text
+    consent_request = re.search(r'name="consent_request" value="([^"]+)"', resp.text)
+    assert consent_request
+    resp = await dcr_client.post(
+        "/oauth/authorize",
+        data={
+            "consent_request": consent_request.group(1),
+            "action": "allow",
+            "scope": ALL_SCOPES.split(),
+        },
+        cookies={"session": session_cookie},
+    )
+    code = parse_qs(urlsplit(resp.headers["location"]).query)["code"][0]
+
+    resp = await dcr_client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "redirect_uri": LITELLM_REDIRECT,
+            "code_verifier": VERIFIER,
+        },
+    )
+    assert resp.status_code == 200
+    at = resp.json()["access_token"]
+    resp = await _call(dcr_client, at, "whoami")
+    assert resp.json()["result"]["structuredContent"]["email"] == "test@example.com"
+
+    grants = (await dcr_client.get("/api/oauth/grants", cookies={"session": session_cookie})).json()
+    assert grants[0]["client_name"] == "Priority_notify"
+
+
+async def test_dcr_redirect_must_match_registration(
+    dcr_client: AsyncClient, test_user: User, session_cookie: str
+) -> None:
+    client_id = (await _register(dcr_client)).json()["client_id"]
+    resp = await dcr_client.get(
+        "/oauth/authorize",
+        params=_authorize_params(
+            client_id=client_id, redirect_uri="https://litellm.osmosis.page/x"
+        ),
+        cookies={"session": session_cookie},
+    )
+    assert resp.status_code == 400
+    assert "location" not in resp.headers
+
+
+async def test_unknown_registered_client(dcr_client: AsyncClient, session_cookie: str) -> None:
+    resp = await dcr_client.get(
+        "/oauth/authorize",
+        params=_authorize_params(client_id="pn_client_nope", redirect_uri=LITELLM_REDIRECT),
+        cookies={"session": session_cookie},
+    )
+    assert resp.status_code == 400
+
+
+async def test_dcr_prunes_stale_unused_clients(dcr_client: AsyncClient, db: Any) -> None:
+    old_id = (await _register(dcr_client)).json()["client_id"]
+    stale = await db.get(OAuthClient, old_id)
+    stale.created_at = utcnow() - timedelta(days=2)
+    await db.commit()
+
+    await _register(dcr_client)
+    ids = await db.execute(select(OAuthClient.id).execution_options(populate_existing=True))
+    assert old_id not in set(ids.scalars().all())

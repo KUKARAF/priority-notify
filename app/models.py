@@ -114,6 +114,21 @@ class ManagementKey(Base):
     user: Mapped["User"] = relationship()
 
 
+class OAuthClient(Base):
+    """A public OAuth client registered through Dynamic Client Registration (RFC 7591).
+
+    CIMD clients aren't stored: their client_id is a URL we fetch instead.
+    """
+
+    __tablename__ = "oauth_clients"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # the client_id
+    client_name: Mapped[str] = mapped_column(String(255))
+    client_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    redirect_uris: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class OAuthGrant(Base):
     """A user's authorization of one OAuth client (e.g. Claude) — one per user and client.
 

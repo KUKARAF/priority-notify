@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # URLs on these hosts are accepted.
     OAUTH_SERVER_ENABLED: bool = False
     OAUTH_CIMD_ALLOWED_HOSTS: str = ""
+    # Dynamic Client Registration (RFC 7591) at /oauth/register, for clients without CIMD
+    # support (LiteLLM, Cursor, ...). Off while empty; otherwise the only hosts registered
+    # redirect_uris may point at (list localhost/127.0.0.1 to allow native loopback clients).
+    OAUTH_DCR_ALLOWED_REDIRECT_HOSTS: str = ""
 
     @property
     def allowed_hosts_list(self) -> list[str]:
@@ -40,6 +44,11 @@ class Settings(BaseSettings):
     @property
     def cimd_allowed_hosts_list(self) -> list[str]:
         return [h.strip().lower() for h in self.OAUTH_CIMD_ALLOWED_HOSTS.split(",") if h.strip()]
+
+    @property
+    def dcr_allowed_redirect_hosts_list(self) -> list[str]:
+        hosts = self.OAUTH_DCR_ALLOWED_REDIRECT_HOSTS.split(",")
+        return [h.strip().lower() for h in hosts if h.strip()]
 
     @property
     def cors_origins_list(self) -> list[str]:

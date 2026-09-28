@@ -52,12 +52,16 @@ PUBLIC_URL=https://notifications.osmosis.page   # must be the URL clients see
 MCP_ENABLED=true                                 # /api/mcp, usable with API tokens
 OAUTH_SERVER_ENABLED=true                        # interactive sign-in for assistants
 OAUTH_CIMD_ALLOWED_HOSTS=claude.ai,chatgpt.com   # hosts whose CIMD clients may sign in
+OAUTH_DCR_ALLOWED_REDIRECT_HOSTS=litellm.osmosis.page  # dynamic client registration; empty = off
 ```
+
+Clients without CIMD support, such as LiteLLM or Cursor, register themselves through Dynamic Client Registration (RFC 7591) at `/oauth/register`, just as Grist's `/oidc/reg` works. Only public PKCE clients are accepted, and their `redirect_uris` must point at a host listed in `OAUTH_DCR_ALLOWED_REDIRECT_HOSTS`. Registrations that nobody authorizes within a day are pruned.
 
 Then connect:
 
 - **Claude.ai / Claude Desktop:** Settings → Connectors → Add custom connector → `https://<host>/api/mcp`
 - **ChatGPT:** Settings → Apps → Create app (developer mode), Authentication: OAuth
+- **LiteLLM:** add an MCP server with the URL above, Authentication: OAuth, Interactive (PKCE), and leave Client ID blank
 - **Claude Code:** `claude mcp add --transport http priority-notify https://<host>/api/mcp`
   You can skip OAuth by passing an API token: `--header "Authorization: Bearer <token>"`
 

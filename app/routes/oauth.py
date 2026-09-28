@@ -1,6 +1,6 @@
 import secrets
-from datetime import datetime
-from urllib.parse import urlencode
+from datetime import UTC, datetime
+from urllib.parse import urlencode, urlsplit
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -20,6 +20,7 @@ from app.oauth import (
     AUTHORIZATION_CODE_TTL,
     SCOPES,
     InvalidClientError,
+    InvalidClientMetadataError,
     delete_grant,
     find_token,
     format_scope,
@@ -27,6 +28,7 @@ from app.oauth import (
     issue_tokens,
     parse_scope,
     redirect_uri_allowed,
+    register_client,
     resource_url,
     utcnow,
     verify_pkce,
@@ -89,23 +91,24 @@ async def authorization_server_metadata(
     settings: Settings = Depends(require_oauth_server),
 ) -> JSONResponse:
     base = settings.public_url
-    return JSONResponse(
-        {
-            "issuer": base,
-            "authorization_endpoint": f"{base}/oauth/authorize",
-            "token_endpoint": f"{base}/oauth/token",
-            "revocation_endpoint": f"{base}/oauth/revoke",
-            "scopes_supported": list(SCOPES),
-            "response_types_supported": ["code"],
-            "response_modes_supported": ["query"],
-            "grant_types_supported": ["authorization_code", "refresh_token"],
-            "code_challenge_methods_supported": ["S256"],
-            "token_endpoint_auth_methods_supported": ["none"],
-            "revocation_endpoint_auth_methods_supported": ["none"],
-            "authorization_response_iss_parameter_supported": True,
-            "client_id_metadata_document_supported": True,
-        }
-    )
+    metadata: dict[str, object] = {
+        "issuer": base,
+        "authorization_endpoint": f"{base}/oauth/authorize",
+        "token_endpoint": f"{base}/oauth/token",
+        "revocation_endpoint": f"{base}/oauth/revoke",
+        "scopes_supported": list(SCOPES),
+        "response_types_supported": ["code"],
+        "response_modes_supported": ["query"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"],
+        "revocation_endpoint_auth_methods_supported": ["none"],
+        "authorization_response_iss_parameter_supported": True,
+        "client_id_metadata_document_supported": True,
+    }
+    if settings.dcr_allowed_redirect_hosts_list:
+        metadata["registration_endpoint"] = f"{base}/oauth/register"
+    return JSONResponse(metadata)
 
 
 @router.get("/.well-known/oauth-protected-resource")
@@ -141,7 +144,7 @@ async def authorize(
     if not client_id or not redirect_uri:
         return _error_page(request, "The request is missing client_id or redirect_uri.")
     try:
-        client = await get_client_metadata(client_id, settings)
+        client = await get_client_metadata(client_id, settings, db)
     except InvalidClientError as exc:
         log.warning("oauth_invalid_client", client_id=client_id, reason=str(exc))
         return _error_page(request, f"This app can't sign in here: {exc}.")
@@ -185,6 +188,7 @@ async def authorize(
             "user": user,
             "client": client,
             "scopes": [(s, SCOPES[s]) for s in requested],
+            "redirect_host": urlsplit(redirect_uri).netloc,
             "consent_request": consent_request,
         },
         headers=_CONSENT_HEADERS,
@@ -257,6 +261,49 @@ async def authorize_decision(
     log.info("oauth_consent_granted", user_id=user.id, client_id=req["client_id"], scope=scope)
     redirect = with_query(redirect_uri, {**base_params, "code": code})
     return RedirectResponse(redirect, status_code=302)
+
+
+# --- Dynamic Client Registration ---
+
+
+@router.post("/oauth/register")
+async def register(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(require_oauth_server),
+) -> JSONResponse:
+    if not settings.dcr_allowed_redirect_hosts_list:
+        raise HTTPException(status_code=404, detail="Not Found")
+    try:
+        doc = await request.json()
+    except ValueError:
+        return _oauth_error("invalid_client_metadata", "Body must be JSON")
+    try:
+        client, ignored = await register_client(db, settings, doc)
+    except InvalidClientMetadataError as exc:
+        log.warning("oauth_dcr_rejected", error=exc.error, reason=exc.description)
+        return _oauth_error(exc.error, exc.description)
+
+    log.info(
+        "oauth_client_registered",
+        client_id=client.id,
+        client_name=client.client_name,
+        redirect_uris=client.redirect_uris,
+        ignored=ignored,
+    )
+    return JSONResponse(
+        {
+            "client_id": client.id,
+            "client_id_issued_at": int(client.created_at.replace(tzinfo=UTC).timestamp()),
+            "client_name": client.client_name,
+            "redirect_uris": client.redirect_uris,
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+        },
+        status_code=201,
+        headers=_NO_STORE,
+    )
 
 
 # --- Token endpoint ---
