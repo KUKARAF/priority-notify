@@ -24,6 +24,49 @@ router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 badge_router = APIRouter(prefix="/api/users", tags=["users"])
 
 
+async def create_notification_for(
+    db: AsyncSession, user: User, payload: NotificationCreate
+) -> NotificationResponse:
+    """Store a notification and push it to the user's live SSE subscribers."""
+    notification = Notification(
+        user_id=user.id,
+        title=payload.title,
+        message=payload.message,
+        priority=payload.priority,
+        source=payload.source,
+        notification_icon=payload.notification_icon,
+        metadata_=payload.metadata,
+    )
+    db.add(notification)
+    await db.commit()
+    await db.refresh(notification)
+
+    response = NotificationResponse.model_validate(notification)
+    await broker.publish(user.id, "notification", response.model_dump(mode="json"))
+
+    log.info("notification_created", id=notification.id, user_id=user.id, priority=payload.priority)
+    return response
+
+
+async def set_notification_status(
+    db: AsyncSession, notification: Notification, status: Status
+) -> NotificationResponse:
+    notification.status = status
+    if status == Status.read and notification.read_at is None:
+        notification.read_at = datetime.now(UTC)
+
+    await db.commit()
+    await db.refresh(notification)
+
+    response = NotificationResponse.model_validate(notification)
+    await broker.publish(
+        notification.user_id,
+        "status_change",
+        {"id": notification.id, "status": notification.status.value},
+    )
+    return response
+
+
 @badge_router.get("/{user_id}/badge")
 async def badge(
     user_id: str,
@@ -86,24 +129,7 @@ async def create_notification(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_scope(TokenScope.write)),
 ) -> NotificationResponse:
-    notification = Notification(
-        user_id=user.id,
-        title=payload.title,
-        message=payload.message,
-        priority=payload.priority,
-        source=payload.source,
-        notification_icon=payload.notification_icon,
-        metadata_=payload.metadata,
-    )
-    db.add(notification)
-    await db.commit()
-    await db.refresh(notification)
-
-    response = NotificationResponse.model_validate(notification)
-    await broker.publish(user.id, "notification", response.model_dump(mode="json"))
-
-    log.info("notification_created", id=notification.id, user_id=user.id, priority=payload.priority)
-    return response
+    return await create_notification_for(db, user, payload)
 
 
 @router.get("/stream")
@@ -162,22 +188,9 @@ async def update_notification(
     if not notification:
         raise HTTPException(status_code=404, detail="Notification not found")
 
-    if payload.status is not None:
-        notification.status = payload.status
-        if payload.status == Status.read and notification.read_at is None:
-            notification.read_at = datetime.now(UTC)
-
-    await db.commit()
-    await db.refresh(notification)
-
-    response = NotificationResponse.model_validate(notification)
-    await broker.publish(
-        user.id,
-        "status_change",
-        {"id": notification.id, "status": notification.status.value},
-    )
-
-    return response
+    if payload.status is None:
+        return NotificationResponse.model_validate(notification)
+    return await set_notification_status(db, notification, payload.status)
 
 
 @router.delete("/{notification_id}", status_code=204)

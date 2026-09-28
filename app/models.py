@@ -112,3 +112,61 @@ class ManagementKey(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship()
+
+
+class OAuthGrant(Base):
+    """A user's authorization of one OAuth client (e.g. Claude) — one per user and client.
+
+    Revoking the grant deletes every code and token issued under it.
+    """
+
+    __tablename__ = "oauth_grants"
+    __table_args__ = (Index("ix_oauth_grant_user_client", "user_id", "client_id", unique=True),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    # For CIMD clients the client_id is the URL of their metadata document.
+    client_id: Mapped[str] = mapped_column(String(2048))
+    client_name: Mapped[str] = mapped_column(String(255))
+    client_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    scope: Mapped[str] = mapped_column(Text)  # space-separated, as last consented
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship()
+
+
+class OAuthAuthorizationCode(Base):
+    __tablename__ = "oauth_authorization_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    grant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("oauth_grants.id", ondelete="CASCADE"), index=True
+    )
+    code_lookup: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    redirect_uri: Mapped[str] = mapped_column(String(2048))
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    scope: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class OAuthTokenKind(enum.StrEnum):
+    access = "access"
+    refresh = "refresh"
+
+
+class OAuthToken(Base):
+    __tablename__ = "oauth_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    grant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("oauth_grants.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[OAuthTokenKind] = mapped_column(Enum(OAuthTokenKind))
+    # SHA-256 of the opaque token (see auth.lookup_hash); the plaintext is never stored.
+    token_lookup: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    scope: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+    grant: Mapped["OAuthGrant"] = relationship()

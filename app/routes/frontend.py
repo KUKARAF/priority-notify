@@ -7,7 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user_from_session
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import ClientToken, ManagementKey, Notification, Priority, Status, User
+from app.models import (
+    ClientToken,
+    ManagementKey,
+    Notification,
+    OAuthGrant,
+    Priority,
+    Status,
+    User,
+)
+from app.oauth import resource_url
 from app.schemas import ManagementKeyStatus
 
 router = APIRouter(tags=["frontend"])
@@ -97,6 +106,7 @@ async def notifications_fragment(
 async def tokens_page(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     user: User | None = Depends(_get_optional_user),
 ) -> HTMLResponse:
     if not user:
@@ -119,6 +129,12 @@ async def tokens_page(
         )
     )
 
+    grants_result = await db.execute(
+        select(OAuthGrant)
+        .where(OAuthGrant.user_id == user.id)
+        .order_by(OAuthGrant.created_at.desc())
+    )
+
     return templates.TemplateResponse(
         request,
         "tokens.html",
@@ -126,6 +142,8 @@ async def tokens_page(
             "user": user,
             "tokens": tokens,
             "mgmt_key": mgmt_key,
+            "grants": grants_result.scalars().all(),
+            "mcp_url": resource_url(settings) if settings.MCP_ENABLED else None,
             "active": "tokens",
         },
     )

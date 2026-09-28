@@ -24,14 +24,24 @@ from app.schemas import UserResponse
 log = structlog.get_logger()
 router = APIRouter()
 
-# In-memory state store for OIDC (fine for single-process)
-_pending_states: set[str] = set()
+# In-memory state store for OIDC (fine for single-process): state -> post-login path
+_pending_states: dict[str, str] = {}
+
+
+def _safe_next(next_path: str | None) -> str:
+    """Only allow same-origin relative paths, so `next` can't become an open redirect."""
+    if not next_path or not next_path.startswith("/") or next_path.startswith(("//", "/\\")):
+        return "/"
+    return next_path
 
 
 @router.get("/auth/login")
-async def login(settings: Settings = Depends(get_settings)) -> RedirectResponse:
+async def login(
+    next: str | None = None,
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
-    _pending_states.add(state)
+    _pending_states[state] = _safe_next(next)
     oidc_config = await get_oidc_config(settings)
     url = build_authorization_url(oidc_config, settings, state)
     return RedirectResponse(url)
@@ -45,9 +55,9 @@ async def callback(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
-    if state not in _pending_states:
+    next_path = _pending_states.pop(state, None)
+    if next_path is None:
         return RedirectResponse("/auth/login")
-    _pending_states.discard(state)
 
     oidc_config = await get_oidc_config(settings)
     token_data = await exchange_code_for_tokens(code, oidc_config, settings)
@@ -74,7 +84,7 @@ async def callback(
     sm = SessionManager(settings.SECRET_KEY)
     session_token = sm.create_session(user.id)
 
-    response = RedirectResponse("/", status_code=302)
+    response = RedirectResponse(next_path, status_code=302)
     response.set_cookie(
         SESSION_COOKIE,
         session_token,

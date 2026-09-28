@@ -128,6 +128,56 @@
   </div>
   <button class="btn btn-ghost" onclick="dismissManagementKey()">Done</button>
 </div>
+
+{% if mcp_url or grants %}
+<section class="card">
+  <h2>Connected apps</h2>
+  {% if mcp_url %}
+  <p class="muted">
+    Connect Claude, ChatGPT or another MCP client with this server URL. You'll sign in and
+    choose what it may do.
+  </p>
+  <div class="token-value-row">
+    <code class="token-value">{{ mcp_url }}</code>
+    <button class="btn btn-small" onclick="navigator.clipboard.writeText('{{ mcp_url }}')">Copy</button>
+  </div>
+  {% endif %}
+  {% if grants %}
+  <table class="token-table">
+    <thead>
+      <tr>
+        <th>App</th>
+        <th>Permissions</th>
+        <th>Connected</th>
+        <th>Last used</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in grants %}
+      <tr data-grant-id="{{ g.id }}">
+        <td class="token-name" title="{{ g.client_id }}">{{ g.client_name }}</td>
+        <td>{% for s in g.scope.split() %}<span class="scope-badge">{{ s }}</span> {% endfor %}</td>
+        <td><time datetime="{{ g.created_at }}">{{ g.created_at.strftime('%b %d, %Y') }}</time></td>
+        <td>
+          {% if g.last_used_at %}
+          <time datetime="{{ g.last_used_at }}">{{ g.last_used_at.strftime('%b %d, %H:%M') }}</time>
+          {% else %}
+          <span class="muted">Never</span>
+          {% endif %}
+        </td>
+        <td>
+          <button class="btn btn-small btn-danger" data-name="{{ g.client_name }}" onclick="revokeGrant('{{ g.id }}', this.dataset.name)">Disconnect</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No apps connected yet.</p>
+  {% endif %}
+</section>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

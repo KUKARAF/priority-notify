@@ -193,6 +193,15 @@ async function revokeToken(id, name) {
   }
 }
 
+async function revokeGrant(id, name) {
+  if (!confirm(`Disconnect "${name}"? It will lose access immediately.`)) return;
+  const resp = await fetch(`/api/oauth/grants/${id}`, { method: 'DELETE' });
+  if (resp.ok) {
+    const row = document.querySelector(`tr[data-grant-id="${id}"]`);
+    if (row) row.remove();
+  }
+}
+
 // === Management key ===
 
 async function generateManagementKey() {

@@ -378,6 +378,16 @@ body {
 .login-card h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
 .login-card p { color: var(--text-muted); margin-bottom: 1.5rem; }
 
+/* === OAuth consent === */
+.consent-card { text-align: left; max-width: 480px; margin: 1rem; }
+.consent-card p { font-size: 0.9rem; }
+.consent-scopes { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+.consent-scopes legend { padding: 0 0.25rem; font-size: 0.85rem; color: var(--text-muted); }
+.consent-scope { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.35rem 0; font-size: 0.9rem; cursor: pointer; }
+.consent-scope input { margin-top: 0.3rem; }
+.consent-scope code { display: block; font-size: 0.7rem; color: var(--text-muted); }
+.consent-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
 /* === Modal === */
 .modal-overlay {
   position: fixed;

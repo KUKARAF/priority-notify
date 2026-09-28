@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import get_settings
 from app.database import engine
 from app.models import Base
-from app.routes import auth, frontend, notifications, tokens
+from app.routes import auth, frontend, mcp, notifications, oauth, tokens
 
 settings = get_settings()
 
@@ -60,6 +60,8 @@ app.include_router(auth.router)
 app.include_router(notifications.router)
 app.include_router(notifications.badge_router)
 app.include_router(tokens.router)
+app.include_router(oauth.router)
+app.include_router(mcp.router)
 app.include_router(frontend.router)
 
 
