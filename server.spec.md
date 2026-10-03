@@ -9,7 +9,7 @@ A self-hosted Python FastAPI server that receives notifications from external so
 - Accept notifications from arbitrary sources via authenticated API
 - Store notification history and read/unread status per user
 - Deliver notifications to clients in near-real-time via SSE
-- Deliver push notifications to registered mobile devices via Firebase Cloud Messaging (FCM)
+- Deliver push notifications to registered mobile devices via UnifiedPush (endpoint POST)
 - Serve a simple web UI for notification viewing and token management
 - Authenticate users via OIDC with Authentik (auth.osmosis.page)
 - Authenticate client devices via API tokens
@@ -17,7 +17,7 @@ A self-hosted Python FastAPI server that receives notifications from external so
 ### Non-Goals
 - Enterprise multi-tenancy (personal/self-hosted)
 - SPA frontend or separate frontend build process
-- Push delivery beyond FCM (APNs, email, SMS)
+- Push delivery beyond UnifiedPush (FCM, APNs, email, SMS)
 - Complex user management (delegated to Authentik)
 - Horizontal scaling or clustering
 
@@ -247,18 +247,20 @@ data: {"id": "...", "status": "read"}
 | DELETE | `/api/tokens/{token_id}` | Session | Revoke token |
 | GET | `/api/tokens/{token_id}/qr` | Session | QR code image (PNG) containing the token |
 
-### Push devices (`/api/push/`)
+### Push (`/api/push/`)
 
-Devices (e.g. the Android client) register their FCM token to receive push. All endpoints
-accept a browser session or an API token with `read` scope (receiving push ≈ reading).
+Devices (e.g. the Android client) register their UnifiedPush endpoint URL to receive push.
+The route accepts a browser session or an API token with `read` scope (receiving push ≈
+reading).
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/push/devices` | Session or Token (read) | Register/upsert a device by FCM token |
-| GET | `/api/push/devices` | Session or Token (read) | List the caller's registered devices |
-| DELETE | `/api/push/devices/{id}` | Session or Token (read) | Remove a device (ownership-checked) |
+| POST | `/api/push/register` | Session or Token (read) | Register/upsert a UnifiedPush endpoint URL |
 
-The FCM token is write-only: it is never echoed back in any response.
+Request body: `{"endpoint": "<url>"}` — a UnifiedPush endpoint URL (e.g.
+`https://ntfy.sh/upABCDEF1234`). Upserts by endpoint URL: re-registering the same endpoint
+replaces its row rather than duplicating it, and a user may register several endpoints (one
+per device). Response `200`: `{"status": "registered"}`. Unauthenticated: `401`.
 
 ### Web Frontend (`/`)
 
@@ -332,9 +334,7 @@ Errors use HTTP status codes:
 |-------|------|-------|
 | id | UUID | Primary key |
 | user_id | UUID | FK → User, indexed |
-| fcm_token | string | Unique, indexed; FCM registration token (write-only, never returned) |
-| device_type | enum | android (default), gnome, other |
-| label | string | Nullable, user-friendly label |
+| endpoint | string | Unique, indexed; the UnifiedPush endpoint URL the server POSTs to |
 | created_at | datetime | |
 | last_seen_at | datetime | Nullable, updated on (re)registration |
 
@@ -342,7 +342,7 @@ Errors use HTTP status codes:
 - `notification(user_id, created_at)` — listing
 - `notification(user_id, status)` — filtering unread
 - `client_token(token_hash)` — unique, auth lookups
-- `push_device(fcm_token)` — unique; `push_device(user_id)` — per-user fan-out
+- `push_device(endpoint)` — unique; `push_device(user_id)` — per-user fan-out
 
 ### Relationships
 - One User → Many Notifications
@@ -379,28 +379,28 @@ Server-Sent Events are the primary real-time delivery mechanism.
 
 **Reconnection:** SSE clients auto-reconnect. The server sends `id:` fields (notification UUID) so clients can use `Last-Event-ID` to catch up on missed events.
 
-## Push Delivery (FCM)
+## Push Delivery (UnifiedPush)
 
-FCM push is the delivery path for mobile devices that aren't holding an SSE connection open
+UnifiedPush is the delivery path for mobile devices that aren't holding an SSE connection open
 (e.g. a backgrounded or killed Android app). It runs alongside SSE, not instead of it.
 
 **Flow:**
-- A device registers its FCM registration token via `POST /api/push/devices` (one `PushDevice`
-  row per token; re-registering the same token upserts its row).
+- The Android client subscribes to a UnifiedPush distributor (e.g. ntfy) and registers the
+  resulting endpoint URL via `POST /api/push/register` (one `PushDevice` row per endpoint URL;
+  re-registering the same endpoint upserts its row).
 - Whenever a notification is created — via the REST API or the MCP `send_notification` tool, both
   of which funnel through `create_notification_for` — the server fires a best-effort push to every
-  device the recipient has registered, right after the SSE broadcast.
-- Push is sent over FCM HTTP v1 (`.../v1/projects/{FCM_PROJECT_ID}/messages:send`). OAuth tokens
-  for the `firebase.messaging` scope are minted from a service-account key with `google-auth`
-  (cached and refreshed). Messages are **data-only** (no top-level `notification` block) with the
-  fields `{id, title, body, priority, source, icon}` and `android.priority = high`, so the client
-  renders the notification itself in every app state.
-- Delivery is fully guarded: an FCM error never breaks notification creation or the SSE broadcast.
-  Tokens FCM reports as gone (HTTP 404 / `UNREGISTERED` / `InvalidArgument`) are pruned.
+  endpoint the recipient has registered, right after the SSE broadcast.
+- Delivery is a plain HTTP `POST` of the notification JSON (the same body the SSE `notification`
+  event carries: `NotificationResponse` — `{id, user_id, title, message, priority, status,
+  source, notification_icon, created_at, read_at, metadata}`) directly to each endpoint URL. The
+  endpoint URL is itself the delivery capability, so there is **no auth header, no Google, and no
+  credentials** — the distributor forwards the posted body to the device, which renders it.
+- Delivery is fully guarded: a push error never breaks notification creation or the SSE broadcast.
+  Endpoints the distributor reports as permanently gone (HTTP `404` / `410`) are pruned.
 
-**Config / feature flag:** push is disabled unless both `FCM_PROJECT_ID` and
-`FCM_SERVICE_ACCOUNT_FILE` are set (see `Settings.push_enabled`); while disabled, `send_to_user`
-is a no-op and SSE/polling are unaffected.
+**Config:** UnifiedPush needs no configuration or credentials. `send_to_user` simply no-ops when
+the recipient has no registered endpoints; SSE/polling are unaffected.
 
 ## Web Frontend Details
 

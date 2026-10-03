@@ -33,12 +33,6 @@ class Settings(BaseSettings):
     # redirect_uris may point at (list localhost/127.0.0.1 to allow native loopback clients).
     OAUTH_DCR_ALLOWED_REDIRECT_HOSTS: str = ""
 
-    # Firebase Cloud Messaging (HTTP v1) push delivery to registered devices. Off while
-    # either value is empty; SSE/polling delivery is unaffected either way. Set both to
-    # the Firebase project id and the path of its service-account JSON key to enable.
-    FCM_PROJECT_ID: str = ""
-    FCM_SERVICE_ACCOUNT_FILE: str = ""
-
     @property
     def allowed_hosts_list(self) -> list[str]:
         return [h.strip() for h in self.ALLOWED_HOSTS.split(",") if h.strip()]
@@ -59,10 +53,6 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
-
-    @property
-    def push_enabled(self) -> bool:
-        return bool(self.FCM_PROJECT_ID and self.FCM_SERVICE_ACCOUNT_FILE)
 
 
 @lru_cache

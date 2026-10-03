@@ -118,19 +118,19 @@ class ManagementKey(Base):
 
 
 class PushDevice(Base):
-    """A device registered to receive FCM push for a user.
+    """A UnifiedPush endpoint registered to receive push for a user.
 
-    One row per FCM registration token; a user may have several (phone, tablet, ...).
-    Stale tokens are pruned by the FCM sender when the platform reports them gone.
+    One row per endpoint URL; a user may have several (phone, tablet, ...). The endpoint URL
+    is itself the delivery capability — the server POSTs the notification JSON straight to it
+    with no auth. Endpoints the distributor reports as gone (HTTP 404 / 410) are pruned by the
+    sender (see app.push).
     """
 
     __tablename__ = "push_devices"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
-    fcm_token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    device_type: Mapped[DeviceType] = mapped_column(Enum(DeviceType), default=DeviceType.android)
-    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    endpoint: Mapped[str] = mapped_column(String(2048), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

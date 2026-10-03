@@ -65,24 +65,13 @@ class TokenCreatedResponse(TokenResponse):
     token: str  # plaintext, shown only once
 
 
-# --- Push devices ---
+# --- Push (UnifiedPush) ---
 
 
-class PushDeviceCreate(BaseModel):
-    fcm_token: str = Field(max_length=255)
-    device_type: DeviceType = DeviceType.android
-    label: str | None = Field(default=None, max_length=255)
-
-
-class PushDeviceResponse(BaseModel):
-    model_config = {"from_attributes": True}
-
-    id: str
-    device_type: DeviceType
-    label: str | None
-    created_at: datetime
-    last_seen_at: datetime | None
-    # The FCM token is a secret; never echo it back in full.
+class PushRegister(BaseModel):
+    # A UnifiedPush endpoint URL, e.g. "https://ntfy.sh/upABCDEF1234". The URL is itself the
+    # delivery capability, so the server POSTs notification JSON to it with no auth.
+    endpoint: str = Field(max_length=2048)
 
 
 # --- Management key ---

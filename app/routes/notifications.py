@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app import fcm
+from app import push
 from app.auth import require_scope
 from app.database import get_db
 from app.models import Notification, Priority, Status, TokenScope, User
@@ -46,13 +46,13 @@ async def create_notification_for(
     response = NotificationResponse.model_validate(notification)
     await broker.publish(user.id, "notification", response.model_dump(mode="json"))
 
-    # Best-effort FCM push to the user's registered devices. Fully guarded: an FCM failure
-    # must never break notification creation or the SSE broadcast above. This single call
-    # covers both the REST and MCP ingestion paths (both funnel through this function).
+    # Best-effort UnifiedPush delivery to the user's registered endpoints. Fully guarded: a
+    # push failure must never break notification creation or the SSE broadcast above. This
+    # single call covers both the REST and MCP ingestion paths (both funnel through here).
     try:
-        await fcm.send_to_user(db, user.id, notification)
+        await push.send_to_user(db, user.id, notification)
     except SQLAlchemyError:
-        log.warning("fcm_send_to_user_failed", id=notification.id, user_id=user.id, exc_info=True)
+        log.warning("push_send_to_user_failed", id=notification.id, user_id=user.id, exc_info=True)
 
     log.info("notification_created", id=notification.id, user_id=user.id, priority=payload.priority)
     return response
