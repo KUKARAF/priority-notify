@@ -9,6 +9,7 @@ A self-hosted Python FastAPI server that receives notifications from external so
 - Accept notifications from arbitrary sources via authenticated API
 - Store notification history and read/unread status per user
 - Deliver notifications to clients in near-real-time via SSE
+- Deliver push notifications to registered mobile devices via Firebase Cloud Messaging (FCM)
 - Serve a simple web UI for notification viewing and token management
 - Authenticate users via OIDC with Authentik (auth.osmosis.page)
 - Authenticate client devices via API tokens
@@ -16,7 +17,7 @@ A self-hosted Python FastAPI server that receives notifications from external so
 ### Non-Goals
 - Enterprise multi-tenancy (personal/self-hosted)
 - SPA frontend or separate frontend build process
-- Built-in push notification delivery (FCM, APNs, email, SMS)
+- Push delivery beyond FCM (APNs, email, SMS)
 - Complex user management (delegated to Authentik)
 - Horizontal scaling or clustering
 
@@ -246,6 +247,19 @@ data: {"id": "...", "status": "read"}
 | DELETE | `/api/tokens/{token_id}` | Session | Revoke token |
 | GET | `/api/tokens/{token_id}/qr` | Session | QR code image (PNG) containing the token |
 
+### Push devices (`/api/push/`)
+
+Devices (e.g. the Android client) register their FCM token to receive push. All endpoints
+accept a browser session or an API token with `read` scope (receiving push ≈ reading).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/push/devices` | Session or Token (read) | Register/upsert a device by FCM token |
+| GET | `/api/push/devices` | Session or Token (read) | List the caller's registered devices |
+| DELETE | `/api/push/devices/{id}` | Session or Token (read) | Remove a device (ownership-checked) |
+
+The FCM token is write-only: it is never echoed back in any response.
+
 ### Web Frontend (`/`)
 
 | Method | Path | Auth | Description |
@@ -313,14 +327,27 @@ Errors use HTTP status codes:
 | created_at | datetime | |
 | expires_at | datetime | Nullable |
 
+### PushDevice
+| Field | Type | Notes |
+|-------|------|-------|
+| id | UUID | Primary key |
+| user_id | UUID | FK → User, indexed |
+| fcm_token | string | Unique, indexed; FCM registration token (write-only, never returned) |
+| device_type | enum | android (default), gnome, other |
+| label | string | Nullable, user-friendly label |
+| created_at | datetime | |
+| last_seen_at | datetime | Nullable, updated on (re)registration |
+
 ### Database Indexes
 - `notification(user_id, created_at)` — listing
 - `notification(user_id, status)` — filtering unread
 - `client_token(token_hash)` — unique, auth lookups
+- `push_device(fcm_token)` — unique; `push_device(user_id)` — per-user fan-out
 
 ### Relationships
 - One User → Many Notifications
 - One User → Many ClientTokens
+- One User → Many PushDevices
 
 ## Authentication
 
@@ -351,6 +378,29 @@ Server-Sent Events are the primary real-time delivery mechanism.
 - `status_change` — notification status updated (read/archived)
 
 **Reconnection:** SSE clients auto-reconnect. The server sends `id:` fields (notification UUID) so clients can use `Last-Event-ID` to catch up on missed events.
+
+## Push Delivery (FCM)
+
+FCM push is the delivery path for mobile devices that aren't holding an SSE connection open
+(e.g. a backgrounded or killed Android app). It runs alongside SSE, not instead of it.
+
+**Flow:**
+- A device registers its FCM registration token via `POST /api/push/devices` (one `PushDevice`
+  row per token; re-registering the same token upserts its row).
+- Whenever a notification is created — via the REST API or the MCP `send_notification` tool, both
+  of which funnel through `create_notification_for` — the server fires a best-effort push to every
+  device the recipient has registered, right after the SSE broadcast.
+- Push is sent over FCM HTTP v1 (`.../v1/projects/{FCM_PROJECT_ID}/messages:send`). OAuth tokens
+  for the `firebase.messaging` scope are minted from a service-account key with `google-auth`
+  (cached and refreshed). Messages are **data-only** (no top-level `notification` block) with the
+  fields `{id, title, body, priority, source, icon}` and `android.priority = high`, so the client
+  renders the notification itself in every app state.
+- Delivery is fully guarded: an FCM error never breaks notification creation or the SSE broadcast.
+  Tokens FCM reports as gone (HTTP 404 / `UNREGISTERED` / `InvalidArgument`) are pruned.
+
+**Config / feature flag:** push is disabled unless both `FCM_PROJECT_ID` and
+`FCM_SERVICE_ACCOUNT_FILE` are set (see `Settings.push_enabled`); while disabled, `send_to_user`
+is a no-op and SSE/polling are unaffected.
 
 ## Web Frontend Details
 

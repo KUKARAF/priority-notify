@@ -49,6 +49,7 @@ class User(Base):
 
     notifications: Mapped[list["Notification"]] = relationship(back_populates="user")
     tokens: Mapped[list["ClientToken"]] = relationship(back_populates="user")
+    push_devices: Mapped[list["PushDevice"]] = relationship(back_populates="user")
 
 
 class Notification(Base):
@@ -68,7 +69,9 @@ class Notification(Base):
     notification_icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
+    metadata_: Mapped[dict | None] = mapped_column(  # type: ignore[type-arg]
+        "metadata", JSON, nullable=True
+    )
 
     user: Mapped["User"] = relationship(back_populates="notifications")
 
@@ -112,6 +115,26 @@ class ManagementKey(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship()
+
+
+class PushDevice(Base):
+    """A device registered to receive FCM push for a user.
+
+    One row per FCM registration token; a user may have several (phone, tablet, ...).
+    Stale tokens are pruned by the FCM sender when the platform reports them gone.
+    """
+
+    __tablename__ = "push_devices"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    fcm_token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    device_type: Mapped[DeviceType] = mapped_column(Enum(DeviceType), default=DeviceType.android)
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="push_devices")
 
 
 class OAuthClient(Base):

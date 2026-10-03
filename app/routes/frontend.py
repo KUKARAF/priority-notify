@@ -110,7 +110,7 @@ async def tokens_page(
     user: User | None = Depends(_get_optional_user),
 ) -> HTMLResponse:
     if not user:
-        return RedirectResponse("/auth/login")
+        return RedirectResponse("/auth/login")  # type: ignore[return-value]
 
     result = await db.execute(
         select(ClientToken)

@@ -85,8 +85,8 @@ def build_authorization_url(oidc_config: dict, settings: Settings, state: str) -
 
 async def exchange_code_for_tokens(
     code: str,
-    oidc_config: dict,
-    settings: Settings,  # type: ignore[type-arg]
+    oidc_config: dict,  # type: ignore[type-arg]
+    settings: Settings,
 ) -> dict:  # type: ignore[type-arg]
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -112,7 +112,7 @@ async def validate_id_token(id_token: str, settings: Settings) -> dict:  # type:
         raise ValueError("Invalid issuer")
     if claims.get("aud") != settings.AUTHENTIK_CLIENT_ID:
         raise ValueError("Invalid audience")
-    return claims  # type: ignore[no-any-return]
+    return claims
 
 
 # --- User resolution dependencies ---

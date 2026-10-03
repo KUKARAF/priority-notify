@@ -17,7 +17,7 @@ class NotificationCreate(BaseModel):
     priority: Priority = Priority.medium
     source: str | None = Field(default=None, max_length=255)
     notification_icon: str | None = Field(default=None, max_length=64)
-    metadata: dict | None = None
+    metadata: dict | None = None  # type: ignore[type-arg]
 
 
 class NotificationUpdate(BaseModel):
@@ -37,7 +37,7 @@ class NotificationResponse(BaseModel):
     notification_icon: str | None
     created_at: datetime
     read_at: datetime | None
-    metadata: dict | None = Field(default=None, alias="metadata_")
+    metadata: dict | None = Field(default=None, alias="metadata_")  # type: ignore[type-arg]
 
 
 # --- Tokens ---
@@ -63,6 +63,26 @@ class TokenResponse(BaseModel):
 
 class TokenCreatedResponse(TokenResponse):
     token: str  # plaintext, shown only once
+
+
+# --- Push devices ---
+
+
+class PushDeviceCreate(BaseModel):
+    fcm_token: str = Field(max_length=255)
+    device_type: DeviceType = DeviceType.android
+    label: str | None = Field(default=None, max_length=255)
+
+
+class PushDeviceResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    device_type: DeviceType
+    label: str | None
+    created_at: datetime
+    last_seen_at: datetime | None
+    # The FCM token is a secret; never echo it back in full.
 
 
 # --- Management key ---

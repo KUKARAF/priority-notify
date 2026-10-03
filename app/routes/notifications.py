@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app import fcm
 from app.auth import require_scope
 from app.database import get_db
 from app.models import Notification, Priority, Status, TokenScope, User
@@ -44,6 +46,14 @@ async def create_notification_for(
     response = NotificationResponse.model_validate(notification)
     await broker.publish(user.id, "notification", response.model_dump(mode="json"))
 
+    # Best-effort FCM push to the user's registered devices. Fully guarded: an FCM failure
+    # must never break notification creation or the SSE broadcast above. This single call
+    # covers both the REST and MCP ingestion paths (both funnel through this function).
+    try:
+        await fcm.send_to_user(db, user.id, notification)
+    except SQLAlchemyError:
+        log.warning("fcm_send_to_user_failed", id=notification.id, user_id=user.id, exc_info=True)
+
     log.info("notification_created", id=notification.id, user_id=user.id, priority=payload.priority)
     return response
 
@@ -71,7 +81,7 @@ async def set_notification_status(
 async def badge(
     user_id: str,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict:  # type: ignore[type-arg]
     result = await db.execute(
         select(Notification.notification_icon).where(
             Notification.user_id == user_id, Notification.status == Status.unread
