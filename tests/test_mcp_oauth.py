@@ -462,12 +462,13 @@ async def test_full_api_token_can_read(
 # --- Dynamic Client Registration ---
 
 LITELLM_REDIRECT = "https://litellm.osmosis.page/callback"
+MAIL_REDIRECT = "https://mail.osmosis.page/api/integrations/oauth/callback"
 
 
 @pytest.fixture
 async def dcr_client(client: AsyncClient) -> AsyncGenerator[AsyncClient]:
     app.dependency_overrides[get_settings] = lambda: _settings(
-        OAUTH_DCR_ALLOWED_REDIRECT_HOSTS="litellm.osmosis.page,localhost"
+        OAUTH_DCR_ALLOWED_REDIRECT_HOSTS="litellm.osmosis.page,mail.osmosis.page,localhost"
     )
     yield client
 
@@ -505,6 +506,27 @@ async def test_dcr_rejects_unlisted_redirects(dcr_client: AsyncClient) -> None:
     resp = await _register(dcr_client, grant_types=["client_credentials"])
     assert resp.json()["error"] == "invalid_client_metadata"
     assert (await _register(dcr_client, redirect_uris=[])).status_code == 400
+
+
+async def test_dcr_mail_osmosis_page_registers(dcr_client: AsyncClient) -> None:
+    # The production allowlist (see .env.example) admits mail.osmosis.page alongside LiteLLM.
+    resp = await _register(
+        dcr_client, client_name="mail.osmosis.page", redirect_uris=[MAIL_REDIRECT]
+    )
+    assert resp.status_code == 201
+    assert resp.json()["redirect_uris"] == [MAIL_REDIRECT]
+    assert (await _register(dcr_client)).status_code == 201
+
+    for uri in [
+        "https://notmail.osmosis.page/api/integrations/oauth/callback",
+        "https://mail.osmosis.page.evil.example/api/integrations/oauth/callback",
+    ]:
+        resp = await _register(dcr_client, redirect_uris=[uri])
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "invalid_redirect_uri"
+    # One unlisted URI poisons the whole registration.
+    resp = await _register(dcr_client, redirect_uris=[MAIL_REDIRECT, "https://evil.example/cb"])
+    assert resp.json()["error"] == "invalid_redirect_uri"
 
 
 async def test_dcr_full_flow(dcr_client: AsyncClient, test_user: User, session_cookie: str) -> None:

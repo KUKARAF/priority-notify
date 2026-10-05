@@ -52,10 +52,10 @@ PUBLIC_URL=https://notifications.osmosis.page   # must be the URL clients see
 MCP_ENABLED=true                                 # /api/mcp, usable with API tokens
 OAUTH_SERVER_ENABLED=true                        # interactive sign-in for assistants
 OAUTH_CIMD_ALLOWED_HOSTS=claude.ai,chatgpt.com   # hosts whose CIMD clients may sign in
-OAUTH_DCR_ALLOWED_REDIRECT_HOSTS=litellm.osmosis.page  # dynamic client registration; empty = off
+OAUTH_DCR_ALLOWED_REDIRECT_HOSTS=litellm.osmosis.page,mail.osmosis.page  # dynamic client registration; empty = off
 ```
 
-Clients without CIMD support, such as LiteLLM or Cursor, register themselves through Dynamic Client Registration (RFC 7591) at `/oauth/register`, just as Grist's `/oidc/reg` works. Only public PKCE clients are accepted, and their `redirect_uris` must point at a host listed in `OAUTH_DCR_ALLOWED_REDIRECT_HOSTS`. Registrations that nobody authorizes within a day are pruned.
+Clients without CIMD support, such as LiteLLM, Cursor or mail.osmosis.page, register themselves through Dynamic Client Registration (RFC 7591) at `/oauth/register`, just as Grist's `/oidc/reg` works. Only public PKCE clients are accepted, and their `redirect_uris` must point at a host listed in `OAUTH_DCR_ALLOWED_REDIRECT_HOSTS`. Registrations that nobody authorizes within a day are pruned.
 
 Then connect:
 
